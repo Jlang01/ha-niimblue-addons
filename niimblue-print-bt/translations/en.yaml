@@ -1,0 +1,21 @@
+configuration:
+  address:
+    name: Printer Bluetooth address
+    description: >-
+      Bluetooth MAC (AA:BB:CC:DD:EE:FF). Pair the printer first, then set its
+      MAC here. List nearby devices via the /api/scan endpoint or bluetoothctl.
+  model:
+    name: Printer model
+    description: b1, b18, b21, d11 or d110. The B21S uses b21.
+  density:
+    name: Print density
+    description: Darkness 1-5 (B21 default 3).
+  rotate:
+    name: Rotate
+    description: Rotate the label 0/90/180/270 (clockwise) before printing.
+  mqtt_enabled:
+    name: Enable MQTT discovery
+    description: Publish connected/reconnect entities to Home Assistant.
+  log_level:
+    name: Log level
+    description: trace, debug, info, warning or error.

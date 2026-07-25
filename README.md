@@ -26,6 +26,19 @@ host**, it prints from the HA machine. Automations can print via a REST call.
 
 See its [DOCS](./niimblue-print/DOCS.md).
 
+### [NiimBlue Print (Bluetooth)](./niimblue-print-bt) — experimental
+
+Same designer, but prints over the **host's internal Bluetooth** adapter via a
+Bluetooth Classic RFCOMM (SPP) socket ([niimprint](https://github.com/AndBondStyle/niimprint)).
+Kernel/BlueZ-arbitrated, so it **coexists with Home Assistant's Bluetooth
+integration** — no USB dongle, no USB passthrough, no exclusive adapter grab.
+
+- Classic SPP (not BLE); printer must be **paired** and its MAC set
+- For when you can't pass the USB device through
+- Not yet verified against hardware — **prefer the serial add-on** where possible
+
+See its [DOCS](./niimblue-print-bt/DOCS.md).
+
 ## Credits
 
 Built on [NiimBlue](https://github.com/MultiMote/niimblue),
