@@ -1,12 +1,13 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM} AS designer
+# Home Assistant add-on image. Supervisor builds FROM the HA base (Alpine/apk),
+# passing BUILD_FROM. Default set so plain `docker build` works too.
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
 
 # --- Build NiimBlue from source with a RELATIVE base path ---------------
-# HA ingress serves the add-on under /api/hassio_ingress/<token>/, so the
-# app MUST use relative asset paths (vite base './'). The prebuilt release
-# uses absolute '/assets/...' which 404s under ingress — hence source build.
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# HA ingress serves under /api/hassio_ingress/<token>/, so the app MUST use
+# relative asset paths (vite base './'). The prebuilt release uses absolute
+# '/assets/...' which 404s under ingress — hence source build.
+FROM ${BUILD_FROM} AS designer
+RUN apk add --no-cache nodejs npm git
 ARG NIIMBLUE_REF=main
 RUN git clone --depth 1 --branch ${NIIMBLUE_REF} https://github.com/MultiMote/niimblue.git /src
 WORKDIR /src
@@ -16,22 +17,20 @@ RUN npm ci && npm run build -- --base=./
 # ========================================================================
 FROM ${BUILD_FROM}
 
-ENV LANG=C.UTF-8 \
-    NODE_ENV=production \
-    NIIMBLUE_NODE_VERSION=latest
+ENV LANG=C.UTF-8 NODE_ENV=production
 
-# --- System deps ---
-#  nginx  : serve designer + ingress proxy
-#  jq     : parse /data/options.json
-#  mosquitto-clients : MQTT discovery + status publish
-#  build-essential python3 libudev-dev : native build for noble/serialport
-#  libbluetooth-dev : only needed if BLE fallback is used
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      nginx jq curl ca-certificates mosquitto-clients \
-      build-essential python3 pkg-config libudev-dev libbluetooth-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Runtime + native build deps (noble/serialport compile against musl):
+#  nginx jq curl bash mosquitto-clients : runtime glue
+#  nodejs npm                           : run niimblue-node
+#  build-base python3 pkgconf linux-headers eudev-dev : native module build
+#  bluez-dev                            : only needed if BLE fallback is used
+RUN apk add --no-cache \
+      nginx jq curl bash mosquitto-clients \
+      nodejs npm \
+      build-base python3 pkgconf linux-headers eudev-dev bluez-dev
 
 # --- niimblue-node (CLI + REST print server) ---
+ARG NIIMBLUE_NODE_VERSION=latest
 RUN npm install -g @mmote/niimblue-node@${NIIMBLUE_NODE_VERSION} \
     && npm cache clean --force
 

@@ -1,9 +1,9 @@
-# Base images per arch. Debian-based so we get apt for the native build deps
-# (noble/serialport need build-essential, python3, libudev).
+# Base images per arch. Home Assistant Alpine bases (apk), matching the
+# Dockerfile which uses apk + musl-compiled native modules.
 build_from:
-  aarch64: node:20-bookworm-slim
-  amd64: node:20-bookworm-slim
-  armv7: node:20-bookworm-slim
+  aarch64: ghcr.io/home-assistant/aarch64-base:latest
+  amd64: ghcr.io/home-assistant/amd64-base:latest
+  armv7: ghcr.io/home-assistant/armv7-base:latest
 labels:
   org.opencontainers.image.title: "NiimBlue Print"
-  org.opencontainers.image.source: "https://github.com/MultiMote/niimblue-node"
+  org.opencontainers.image.source: "https://github.com/Jlang01/ha-niimblue-addons"
