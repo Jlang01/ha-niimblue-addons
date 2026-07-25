@@ -49,19 +49,20 @@
     var canvas = findCanvas();
     if (!canvas) { toast("No label canvas found to print.", false); return; }
 
-    // The printer encoder requires image WIDTH to be a multiple of 8 (it packs
-    // 8 horizontal pixels per byte) — otherwise: "column must be a multiple of
-    // 8". Pad the right edge with white up to the next multiple of 8 (no scaling,
-    // so no distortion).
+    // The encoder packs 8 pixels per byte and requires the "column count" to be
+    // a multiple of 8. Which axis is "columns" depends on print direction (the
+    // image gets rotated), so pad BOTH width and height up to the next multiple
+    // of 8 with white (no scaling → no distortion).
     var w = canvas.width, h = canvas.height;
     var w8 = Math.ceil(w / 8) * 8;
+    var h8 = Math.ceil(h / 8) * 8;
     var src = canvas;
-    if (w8 !== w) {
+    if (w8 !== w || h8 !== h) {
       var pad = document.createElement("canvas");
-      pad.width = w8; pad.height = h;
+      pad.width = w8; pad.height = h8;
       var pctx = pad.getContext("2d");
       pctx.fillStyle = "#ffffff";
-      pctx.fillRect(0, 0, w8, h);
+      pctx.fillRect(0, 0, w8, h8);
       pctx.drawImage(canvas, 0, 0);
       src = pad;
     }

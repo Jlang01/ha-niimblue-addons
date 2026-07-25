@@ -1,7 +1,7 @@
 # Home Assistant add-on manifest
 # Local add-on: NiimBlue Print Server
 name: NiimBlue Print
-version: "1.0.3"
+version: "1.0.4"
 slug: niimblue_print
 description: >-
   NIIMBOT label designer (NiimBlue) + persistent host-side print server.
