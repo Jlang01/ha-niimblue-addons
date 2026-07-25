@@ -7,7 +7,7 @@ API=http://127.0.0.1:5000
 log() { echo "[niimblue:mqtt] $*"; }
 
 # --- broker credentials from Supervisor ---------------------------------
-SVC=$(curl -sf -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+SVC=$(curl -sf -H "Authorization: Bearer ${SUPERVISOR_TOKEN:-}" \
       http://supervisor/services/mqtt 2>/dev/null || true)
 if [ -z "$SVC" ]; then
   log "MQTT service not available (is the Mosquitto add-on running?). Skipping."

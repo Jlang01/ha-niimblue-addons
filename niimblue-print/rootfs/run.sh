@@ -16,7 +16,8 @@ DENSITY=$(opt density 3)
 THRESHOLD=$(opt threshold 128)
 FIT=$(opt image_fit contain)
 RECONNECT=$(opt reconnect_seconds 10)
-MQTT_ENABLED=$(opt mqtt_enabled true)
+# NB: jq '//' treats false as fallback-trigger, so read booleans explicitly.
+MQTT_ENABLED=$(jq -r 'if .mqtt_enabled == null then true else .mqtt_enabled end' "$OPT")
 LOG_LEVEL=$(opt log_level info)
 
 export NIIMBLUE_LOG_LEVEL="$LOG_LEVEL"
