@@ -1,7 +1,7 @@
 # Home Assistant add-on manifest
 # Local add-on: NiimBlue Print Server
 name: NiimBlue Print
-version: "1.0.2"
+version: "1.0.3"
 slug: niimblue_print
 description: >-
   NIIMBOT label designer (NiimBlue) + persistent host-side print server.
@@ -39,7 +39,8 @@ host_dbus: false
 options:
   transport: serial
   address: ""            # empty = auto-detect serial device (B21 = /dev/ttyACM0)
-  model: ""              # printTask; empty = auto-detect on connect (recommended for B21)
+  model: "B1"            # printTask. B21/B21_C2B use the B1 task (384px head). Info
+                         # auto-detect times out over serial on B21S, so hard-set it.
   label_width: 0         # px; 0 = use the designer image's own size. B21 printhead max = 384
   label_height: 0
   print_direction: top   # top | left

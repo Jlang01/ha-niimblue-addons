@@ -49,8 +49,25 @@
     var canvas = findCanvas();
     if (!canvas) { toast("No label canvas found to print.", false); return; }
 
+    // The printer encoder requires image WIDTH to be a multiple of 8 (it packs
+    // 8 horizontal pixels per byte) — otherwise: "column must be a multiple of
+    // 8". Pad the right edge with white up to the next multiple of 8 (no scaling,
+    // so no distortion).
+    var w = canvas.width, h = canvas.height;
+    var w8 = Math.ceil(w / 8) * 8;
+    var src = canvas;
+    if (w8 !== w) {
+      var pad = document.createElement("canvas");
+      pad.width = w8; pad.height = h;
+      var pctx = pad.getContext("2d");
+      pctx.fillStyle = "#ffffff";
+      pctx.fillRect(0, 0, w8, h);
+      pctx.drawImage(canvas, 0, 0);
+      src = pad;
+    }
+
     var dataUrl;
-    try { dataUrl = canvas.toDataURL("image/png"); }
+    try { dataUrl = src.toDataURL("image/png"); }
     catch (e) { toast("Canvas export failed: " + e, false); return; }
 
     var body = {
