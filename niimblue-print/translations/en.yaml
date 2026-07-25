@@ -1,0 +1,39 @@
+configuration:
+  transport:
+    name: Transport
+    description: How to reach the printer. serial (USB, recommended) or ble.
+  address:
+    name: Printer device
+    description: >-
+      Serial device (dropdown) or BLE MAC. Leave empty to auto-detect the serial
+      port. For a B21 over USB this is /dev/ttyACM0.
+  model:
+    name: Printer model (printTask)
+    description: Leave empty to auto-detect on connect. Recommended for B21.
+  label_width:
+    name: Label width (px)
+    description: 0 = use the designed image's own width. B21 printhead max = 384.
+  label_height:
+    name: Label height (px)
+    description: 0 = use the designed image's own height.
+  print_direction:
+    name: Print direction
+    description: top or left. B21 default is top.
+  density:
+    name: Print density
+    description: Darkness 1-5 (B21 default 3).
+  threshold:
+    name: B/W threshold
+    description: 1-255. Pixels above become black.
+  image_fit:
+    name: Image fit
+    description: How the image is resized to the label (sharp fit modes).
+  reconnect_seconds:
+    name: Reconnect interval (s)
+    description: How often to re-check the connection and republish status.
+  mqtt_enabled:
+    name: Enable MQTT discovery
+    description: Publish connected/battery/reconnect entities to Home Assistant.
+  log_level:
+    name: Log level
+    description: trace, debug, info, warning or error.

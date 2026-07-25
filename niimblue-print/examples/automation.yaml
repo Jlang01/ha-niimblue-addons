@@ -1,0 +1,25 @@
+# Example: print a label when a package arrives / a button is pressed.
+- alias: "Print shipping label on demand"
+  triggers:
+    - trigger: state
+      entity_id: input_button.print_label
+  actions:
+    - action: rest_command.niimblue_print_url
+      data:
+        image_url: "https://your-host/labels/next.png"
+        model: "B1"
+        copies: 1
+
+# Example: nightly reconnect nudge (optional; autoconnect already handles drops)
+- alias: "NiimBlue keep-alive reconnect"
+  triggers:
+    - trigger: time_pattern
+      hours: "/6"
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.niimblue_connected
+      state: "off"
+  actions:
+    - action: rest_command.niimblue_reconnect
+      data:
+        address: "/dev/serial/by-id/usb-NIIMBOT..."

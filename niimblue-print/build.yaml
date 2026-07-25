@@ -1,0 +1,9 @@
+# Base images per arch. Debian-based so we get apt for the native build deps
+# (noble/serialport need build-essential, python3, libudev).
+build_from:
+  aarch64: node:20-bookworm-slim
+  amd64: node:20-bookworm-slim
+  armv7: node:20-bookworm-slim
+labels:
+  org.opencontainers.image.title: "NiimBlue Print"
+  org.opencontainers.image.source: "https://github.com/MultiMote/niimblue-node"

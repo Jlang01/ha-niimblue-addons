@@ -1,0 +1,41 @@
+# Add to configuration.yaml (or a !include). Lets HA automations print labels
+# through the add-on's host-side serial connection.
+#
+# HOST: the add-on exposes port 5000. Reach it either by:
+#   - the HA host IP:            http://192.168.x.x:5000
+#   - the local add-on hostname: http://local-niimblue_print:5000
+# Pick whichever resolves in your setup; IP is the safe default.
+
+rest_command:
+  # Print an image already reachable by URL (e.g. a generated label PNG).
+  # printTask omitted on purpose -> the server auto-detects the B21 on connect.
+  niimblue_print_url:
+    url: "http://192.168.x.x:5000/print"
+    method: POST
+    content_type: "application/json"
+    payload: >-
+      {
+        "imageUrl": "{{ image_url }}",
+        "printDirection": "top",
+        "imageFit": "contain",
+        "quantity": {{ copies | default(1) }}
+      }
+
+  # Print a base64 PNG (e.g. built by a template / python_script / pyscript).
+  niimblue_print_base64:
+    url: "http://192.168.x.x:5000/print"
+    method: POST
+    content_type: "application/json"
+    payload: >-
+      {
+        "imageBase64": "{{ image_b64 }}",
+        "printDirection": "top",
+        "quantity": {{ copies | default(1) }}
+      }
+
+  # Force a reconnect (printer woke from sleep, etc.)
+  niimblue_reconnect:
+    url: "http://192.168.x.x:5000/connect"
+    method: POST
+    content_type: "application/json"
+    payload: '{"transport":"serial","address":"{{ address }}"}'
