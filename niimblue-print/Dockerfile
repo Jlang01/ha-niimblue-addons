@@ -40,5 +40,8 @@ COPY --from=designer /src/dist /opt/niimblue
 COPY rootfs/ /
 RUN chmod +x /run.sh /usr/local/bin/*.sh
 
+# Crash-proof the serial client (write-without-callback kills the process on EIO).
+RUN /usr/local/bin/patch-niimbluelib.sh
+
 EXPOSE 8099 5000
 CMD [ "/run.sh" ]

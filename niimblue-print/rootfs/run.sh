@@ -56,30 +56,30 @@ window.NIIMBLUE_HOST = {
 };
 EOF
 
-# ---- start the print server --------------------------------------------
-# Bind 0.0.0.0 so HA core rest_command can reach it on :5000, and nginx
-# proxies it under ingress. Serial exclusivity = this is the sole owner.
-log "Starting niimblue print server on :5000 ..."
 DBG=""
 case "$LOG_LEVEL" in debug|trace) DBG="-d" ;; esac
-niimblue-cli server -h 0.0.0.0 -p 5000 $DBG &
-SERVER_PID=$!
 
-# wait for server to accept connections
-for i in $(seq 1 30); do
-  curl -sf http://127.0.0.1:5000/connected >/dev/null 2>&1 && break
-  sleep 1
-done
+# ---- nginx (ingress) in background -------------------------------------
+log "Starting nginx (ingress) on :8099 ..."
+nginx -g "daemon off;" &
 
-# ---- autoconnect / reconnect supervisor --------------------------------
+# ---- background helpers (they poll until the server is up) -------------
 export TRANSPORT ADDRESS RECONNECT MODEL
 /usr/local/bin/autoconnect.sh &
-
-# ---- MQTT discovery + status -------------------------------------------
 if [ "$MQTT_ENABLED" = "true" ]; then
   /usr/local/bin/mqtt-discovery.sh &
 fi
 
-# ---- nginx (ingress) in foreground -------------------------------------
-log "Starting nginx (ingress) on :8099 ..."
-exec nginx -g "daemon off;"
+# ---- print server, supervised in the FOREGROUND ------------------------
+# This loop IS the main run.sh process, so s6 keeps run.sh alive and run.sh
+# keeps the server alive. A serial write EIO can still kill the node process
+# despite the lib patch (unhandled stream error) — restart it so /api stays
+# up and returns JSON errors instead of nginx 502s.
+# Bind 0.0.0.0 so HA core rest_command can also reach it on :5000.
+log "Starting niimblue print server on :5000 ..."
+# '|| true' so the server's non-zero exit does NOT trip 'set -e' and abort run.sh.
+while true; do
+  niimblue-cli server -h 0.0.0.0 -p 5000 $DBG || true
+  log "print server exited, restarting in 2s"
+  sleep 2
+done

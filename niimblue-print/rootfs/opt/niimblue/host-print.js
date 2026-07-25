@@ -71,10 +71,19 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      // Read as text first — an nginx 502 returns HTML, not JSON, so we must
+      // not blindly JSON.parse (that produced the "unexpected character" error).
+      .then(function (r) { return r.text().then(function (t) { return { status: r.status, ok: r.ok, text: t }; }); })
       .then(function (res) {
-        if (res.ok) toast("Sent to printer ✓", true);
-        else toast("Print error: " + (res.j.error || JSON.stringify(res.j)), false);
+        var msg = res.text;
+        try { var j = JSON.parse(res.text); msg = j.error || j.message || res.text; } catch (e) {}
+        if (res.ok) {
+          toast("Sent to printer ✓", true);
+        } else if (res.status === 502 || res.status === 504) {
+          toast("Print server is down (it may have crashed on a serial error). Check the add-on log.", false);
+        } else {
+          toast("Print error (" + res.status + "): " + msg, false);
+        }
       })
       .catch(function (e) { toast("Request failed: " + e, false); })
       .finally(function () { btn.disabled = false; btn.textContent = "🖨 Print via host"; });
