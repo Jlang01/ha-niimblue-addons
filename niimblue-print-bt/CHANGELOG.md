@@ -3,6 +3,11 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 0.2.1
+- Print is fully connect-on-demand: each print opens the Bluetooth link to the
+  paired printer, prints, then **explicitly disconnects** (no per-print scan, no
+  lingering connection) so HA's Bluetooth regains the radio between prints.
+
 ## 0.2.0
 - **Pair without SSH.** Added an in-add-on setup page (`./setup.html`, also a
   "⚙ BT" link on the print bar): scan for printers, pair with one click, and it

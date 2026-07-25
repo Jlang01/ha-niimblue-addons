@@ -7,7 +7,7 @@
 # NOTE: this is Bluetooth *Classic* (RFCOMM/SPP), NOT BLE — that is what the
 # niimprint backend speaks. The printer must support Classic SPP and be paired.
 name: NiimBlue Print (Bluetooth)
-version: "0.2.0"
+version: "0.2.1"
 slug: niimblue_print_bt
 description: >-
   NIIMBOT label designer (NiimBlue) + host-side Bluetooth print server. Prints

@@ -219,6 +219,13 @@ def print_label():
                 os.unlink(tmp.name)
             except OSError:
                 pass
+            # niimprint already closed its RFCOMM socket when the process exited;
+            # also tell BlueZ to drop the ACL link so HA fully regains the radio
+            # between prints (connect-on-demand, no lingering connection).
+            try:
+                _bctl(["disconnect", addr], timeout=8)
+            except Exception:
+                pass
 
 
 @app.get("/connected")
