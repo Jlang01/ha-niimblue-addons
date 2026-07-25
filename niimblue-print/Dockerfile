@@ -11,6 +11,10 @@ RUN apk add --no-cache nodejs npm git
 ARG NIIMBLUE_REF=main
 RUN git clone --depth 1 --branch ${NIIMBLUE_REF} https://github.com/MultiMote/niimblue.git /src
 WORKDIR /src
+# Patch UI for host printing: drop the unsupported-browser banner and make the
+# preview's Print button print via the host server (see patch script).
+COPY patch/patch-niimblue-src.js /tmp/patch-niimblue-src.js
+RUN node /tmp/patch-niimblue-src.js
 RUN npm ci && npm run build -- --base=./
 # result: /src/dist  (relative-path SPA)
 
