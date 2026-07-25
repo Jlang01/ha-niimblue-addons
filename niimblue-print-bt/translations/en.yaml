@@ -2,8 +2,9 @@ configuration:
   address:
     name: Printer Bluetooth address
     description: >-
-      Bluetooth MAC (AA:BB:CC:DD:EE:FF). Pair the printer first, then set its
-      MAC here. List nearby devices via the /api/scan endpoint or bluetoothctl.
+      Leave EMPTY to scan and pair from the add-on's setup page (⚙ BT link /
+      setup.html) with no SSH — the paired printer is remembered. Or set a
+      Bluetooth MAC (AA:BB:CC:DD:EE:FF) here to pin one specific printer.
   model:
     name: Printer model
     description: b1, b18, b21, d11 or d110. The B21S uses b21.

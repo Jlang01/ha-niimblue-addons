@@ -7,7 +7,7 @@
 # NOTE: this is Bluetooth *Classic* (RFCOMM/SPP), NOT BLE — that is what the
 # niimprint backend speaks. The printer must support Classic SPP and be paired.
 name: NiimBlue Print (Bluetooth)
-version: "0.1.0"
+version: "0.2.0"
 slug: niimblue_print_bt
 description: >-
   NIIMBOT label designer (NiimBlue) + host-side Bluetooth print server. Prints
@@ -43,8 +43,9 @@ privileged:
 
 # --- User options ---
 options:
-  address: ""            # printer Bluetooth MAC (AA:BB:CC:DD:EE:FF). Required —
-                         # pair the printer first (see docs).
+  address: ""            # printer Bluetooth MAC (AA:BB:CC:DD:EE:FF). Leave EMPTY
+                         # to scan+pair from the add-on's setup page (no SSH);
+                         # the paired MAC is remembered. Set it here to pin one.
   model: "b21"           # b1 | b18 | b21 | d11 | d110 (B21S uses b21)
   density: 3
   rotate: 0              # 0 | 90 | 180 | 270 (clockwise, applied host-side)

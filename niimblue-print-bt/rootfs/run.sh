@@ -31,6 +31,15 @@ EOF
 log "Starting nginx (ingress) on :8099 ..."
 nginx -g "daemon off;" &
 
+# ---- Bluetooth: power the adapter + a Just Works pairing agent ----------
+# bt-agent (NoInputNoOutput) auto-accepts pairing so the setup page can pair
+# the printer without any PIN/prompt. Needs host_dbus -> host BlueZ.
+bluetoothctl --timeout 3 power on >/dev/null 2>&1 || true
+if command -v bt-agent >/dev/null 2>&1; then
+  log "Starting Bluetooth pairing agent (NoInputNoOutput) ..."
+  bt-agent -c NoInputNoOutput >/dev/null 2>&1 &
+fi
+
 # ---- MQTT discovery (optional) -----------------------------------------
 export MODEL ADDRESS PRINT_PORT
 export RECONNECT=10

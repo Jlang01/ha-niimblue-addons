@@ -18,6 +18,7 @@ Endpoints (nginx proxies /api/ -> here):
 """
 import base64
 import io
+import json
 import os
 import re
 import subprocess
@@ -41,8 +42,27 @@ DENSITY = int(opt("DENSITY", "3"))
 ROTATE = str(opt("ROTATE", "0"))
 MAX_WIDTH = 384 if MODEL in ("b1", "b18", "b21") else 96
 
+# When the 'address' option is blank, the MAC paired via the setup page is
+# persisted here (add-on can't write the Supervisor-managed options.json).
+PAIRED_FILE = "/data/paired.json"
+
 _lock = threading.Lock()                # serialize BT ops (one radio, channel 1)
 _last_print_ok = False
+
+
+_MAC_RE = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
+
+
+def current_address():
+    """Configured 'address' option wins; else the MAC saved by the setup page."""
+    if ADDRESS:
+        return ADDRESS
+    try:
+        with open(PAIRED_FILE) as f:
+            a = (json.load(f).get("address") or "").upper()
+        return a if _MAC_RE.match(a) else None
+    except (OSError, ValueError):
+        return None
 
 
 # ---- image prep ----------------------------------------------------------
@@ -76,26 +96,78 @@ def run_niimprint(png_path, addr, model, density, rotate):
     return (p.stdout or "").strip()
 
 
-# ---- bluetoothctl discovery (Classic) -----------------------------------
+# ---- bluetoothctl discovery + pairing (Classic) -------------------------
 _DEV_RE = re.compile(r"Device\s+([0-9A-F:]{17})\s+(.*)", re.I)
 
 
-def bt_devices(scan_seconds=0):
+def _bctl(args, timeout=25):
+    return subprocess.run(["bluetoothctl", *args], capture_output=True,
+                          text=True, timeout=timeout)
+
+
+def device_info(mac):
+    """Full `bluetoothctl info` text, or '' on failure."""
+    try:
+        return _bctl(["info", mac], timeout=12).stdout
+    except Exception:
+        return ""
+
+
+def has_spp(mac, info=None):
+    """True if the device advertises the Serial Port (SPP) UUID — the address
+    niimprint's RFCOMM socket needs (NIIMBOT exposes two addresses)."""
+    txt = info if info is not None else device_info(mac)
+    return "Serial Port" in txt
+
+
+def looks_like_printer(name):
+    n = (name or "").upper()
+    return bool(re.match(r"^(B1|B18|B21|D11|D110)\b", n))
+
+
+def bt_devices(scan_seconds=0, check_spp=True):
     devs = {}
     try:
         if scan_seconds > 0:
             subprocess.run(["bluetoothctl", "--timeout", str(int(scan_seconds)),
                             "scan", "on"], capture_output=True, text=True,
                            timeout=scan_seconds + 5)
-        out = subprocess.run(["bluetoothctl", "devices"], capture_output=True,
-                             text=True, timeout=10).stdout
+        out = _bctl(["devices"], timeout=10).stdout
         for line in out.splitlines():
             m = _DEV_RE.search(line)
             if m:
                 devs[m.group(1).upper()] = m.group(2).strip()
     except Exception as e:  # bluetoothctl absent / no adapter
         app.logger.warning("bluetoothctl failed: %s", e)
-    return [{"address": a, "name": n} for a, n in devs.items()]
+    result = []
+    for a, n in devs.items():
+        entry = {"address": a, "name": n, "likely_printer": looks_like_printer(n)}
+        if check_spp:
+            entry["spp"] = has_spp(a)
+        result.append(entry)
+    # printers first, then SPP-capable
+    result.sort(key=lambda d: (not d["likely_printer"], not d.get("spp")))
+    return result
+
+
+def pair_device(mac):
+    """Pair + trust via BlueZ (a NoInputNoOutput bt-agent auto-accepts). The
+    NIIMBOT SPP link works even if profile-connect reports NotAvailable."""
+    steps = {}
+    try:
+        subprocess.run(["bluetoothctl", "--timeout", "8", "scan", "on"],
+                       capture_output=True, text=True, timeout=15)
+    except Exception as e:
+        steps["scan"] = str(e)
+    for cmd in (["pair", mac], ["trust", mac], ["connect", mac]):
+        try:
+            r = _bctl(cmd, timeout=30)
+            steps[cmd[0]] = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+            steps[cmd[0]] = steps[cmd[0]][0]
+        except Exception as e:
+            steps[cmd[0]] = str(e)
+    info = device_info(mac)
+    return steps, has_spp(mac, info)
 
 
 # ---- routes --------------------------------------------------------------
@@ -106,9 +178,11 @@ def print_label():
     b64 = data.get("imageBase64")
     if not b64:
         return jsonify(error="imageBase64 missing"), 400
-    if not ADDRESS:
-        return jsonify(error="no 'address' set; pair the printer and set its "
-                             "Bluetooth MAC in the add-on options"), 503
+    addr = current_address()
+    if not addr:
+        return jsonify(error="no printer address; pair one on the setup page "
+                             "(./setup.html) or set 'address' in the add-on "
+                             "options"), 503
 
     model = str(data.get("printTask") or data.get("model") or MODEL).lower()
     density = int(data.get("density") or DENSITY)
@@ -134,9 +208,9 @@ def print_label():
             tmp.close()
             out = ""
             for _ in range(max(1, quantity)):
-                out = run_niimprint(tmp.name, ADDRESS, model, density, rotate)
+                out = run_niimprint(tmp.name, addr, model, density, rotate)
             _last_print_ok = True
-            return jsonify(ok=True, address=ADDRESS, output=out)
+            return jsonify(ok=True, address=addr, output=out)
         except Exception as e:
             _last_print_ok = False
             return jsonify(error=str(e)), 500
@@ -149,8 +223,8 @@ def print_label():
 
 @app.get("/connected")
 def connected():
-    # RFCOMM is connect-on-demand; report reachable if a MAC is configured.
-    return jsonify(connected=bool(ADDRESS), battery=None)
+    # RFCOMM is connect-on-demand; report reachable if a MAC is known.
+    return jsonify(connected=bool(current_address()), battery=None)
 
 
 @app.get("/info")
@@ -162,9 +236,45 @@ def info():
 def scan():
     try:
         secs = int(request.args.get("seconds", "8"))
-        return jsonify(devices=bt_devices(secs))
+        spp = request.args.get("spp", "1") not in ("0", "false", "no")
+        return jsonify(devices=bt_devices(secs, check_spp=spp),
+                       current=current_address())
     except Exception as e:
         return jsonify(error=str(e), devices=[]), 500
+
+
+@app.post("/pair")
+def pair():
+    """Pair the given MAC and remember it (used when 'address' option is blank).
+    Body: {"address": "AA:BB:CC:DD:EE:FF"}"""
+    if ADDRESS:
+        return jsonify(error="'address' is set in add-on options; clear it to "
+                             "pair from here"), 409
+    data = request.get_json(force=True, silent=True) or {}
+    mac = (data.get("address") or "").upper()
+    if not _MAC_RE.match(mac):
+        return jsonify(error="invalid MAC address"), 400
+    with _lock:
+        steps, spp = pair_device(mac)
+        try:
+            with open(PAIRED_FILE, "w") as f:
+                json.dump({"address": mac, "spp": spp}, f)
+        except OSError as e:
+            return jsonify(error="paired but could not save: %s" % e,
+                           steps=steps, spp=spp), 500
+    return jsonify(ok=True, address=mac, spp=spp, steps=steps,
+                   warning=None if spp else "This address does NOT advertise the "
+                   "Serial Port (SPP) profile. NIIMBOT exposes two addresses — "
+                   "printing may fail; try the other one.")
+
+
+@app.post("/forget")
+def forget():
+    try:
+        os.unlink(PAIRED_FILE)
+    except OSError:
+        pass
+    return jsonify(ok=True)
 
 
 @app.get("/health")

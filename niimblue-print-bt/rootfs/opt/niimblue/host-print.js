@@ -126,7 +126,16 @@
     "cursor:pointer;border:none;border-radius:6px;padding:8px 12px;" +
     "background:#00b8d4;color:#001318;font-weight:600;";
 
-  bar.appendChild(qty); bar.appendChild(btn);
+  var setup = document.createElement("a");
+  setup.textContent = "⚙ BT";
+  setup.href = "setup.html";                 // relative -> resolves under ingress
+  setup.target = "_blank";
+  setup.title = "Bluetooth printer setup (scan & pair)";
+  setup.style.cssText =
+    "text-decoration:none;color:#cfd8dc;font:12px sans-serif;padding:6px 8px;" +
+    "border:1px solid #ffffff33;border-radius:6px;";
+
+  bar.appendChild(qty); bar.appendChild(btn); bar.appendChild(setup);
 
   function mount() {
     if (document.body) document.body.appendChild(bar);

@@ -23,11 +23,11 @@ ENV LANG=C.UTF-8
 # Runtime + Bluetooth stack:
 #  nginx jq curl bash mosquitto-clients : runtime glue
 #  python3 py3-pip py3-pillow           : print server + niimprint (no compile)
-#  bluez dbus-libs                       : bluetoothctl for pairing/scan + BlueZ
+#  bluez bluez-tools dbus-libs           : bluetoothctl + bt-agent (pair/scan)
 RUN apk add --no-cache \
       nginx jq curl bash mosquitto-clients \
       python3 py3-pip py3-pillow \
-      bluez dbus-libs git
+      bluez bluez-tools dbus-libs git
 
 # Python print backend: niimprint (Bluetooth Classic RFCOMM via AF_BLUETOOTH,
 # uses stdlib socket — no bleak). The PyPI 'niimprint' is a stale placeholder,

@@ -14,26 +14,30 @@ integration. See README.md for the overview and serial-vs-Bluetooth comparison.
 | `rotate` | 0/90/180/270 clockwise rotation before printing. |
 | `mqtt_enabled` | Publish connectivity + reconnect entities. |
 
-## Pairing (do this once)
+## Pairing (do this once) — no SSH needed
 
-On Home Assistant OS host (or via the SSH add-on):
+Leave `address` empty, start the add-on, open the Web UI, and click the
+**⚙ BT** link on the print bar (or open `./setup.html`). Then:
 
-```
-bluetoothctl
-  power on
-  scan on          # wait for the printer to appear, note its MAC
-  pair AA:BB:CC:DD:EE:FF
-  trust AA:BB:CC:DD:EE:FF
-  quit
-```
+1. Turn the printer on, keep it close, click **Scan for printers**.
+2. Pick the row tagged **SPP** (Serial Port) — NIIMBOT shows two addresses and
+   only the SPP one prints — and click **Pair & use**. A NoInputNoOutput agent
+   auto-accepts; the MAC is remembered.
+3. Go back to the designer and print.
 
-Then set that MAC as `address`.
+Prefer to pin a specific MAC instead? Set it as `address` in the options (then
+the setup page's pairing is disabled). You can still pair over SSH the classic
+way (`bluetoothctl` → `power on`, `scan on`, `pair <MAC>`, `trust <MAC>`) if you
+like — Home Assistant has no native UI to pair Bluetooth Classic devices.
 
 ## REST API (port 5001, also proxied under ingress at `./api/`)
 
 - `POST /print` — `{ "imageBase64": "...", "density": 3, "model": "b21", "quantity": 1, "rotate": 0 }`
-- `GET /scan?seconds=8` — list nearby/known Bluetooth devices `{name,address}`
+- `GET /scan?seconds=8` — list devices `{name,address,spp,likely_printer}` + `current`
+- `POST /pair` — `{ "address": "AA:BB:CC:DD:EE:FF" }` pair + remember
+- `POST /forget` — drop the remembered printer
 - `GET /connected` — `{connected, battery}`
+- `GET /setup.html` — the scan/pair Web UI (no SSH)
 
 ## Print from an automation
 
