@@ -25,6 +25,8 @@ via a REST call.
   own adapter via BlueZ/D-Bus, **coexists with HA's Bluetooth integration**,
   no pairing, no dongle
 - Starts without the printer, reconnects by itself, status entity via MQTT
+- Detects the label roll (RFID) and fits prints to its size; label name and
+  labels-remaining sensors
 - Ingress UI (authenticated), MQTT auto-discovery, NIIMBOT USB auto-detection
 - Tested target: **NIIMBOT B21S** (USB `3513:0002` → `/dev/ttyACM0`; BLE
   `B21S-…`)

@@ -7,11 +7,51 @@
  *
  * The canvas selector is version-sensitive (NiimBlue uses fabric.js). If export
  * grabs the wrong element, adjust CANVAS_SELECTORS below.
+ *
+ * Label roll: api/label.js (loaded just before this file) sets
+ * window.NIIMBLUE_LABEL to the roll the printer reported (RFID + size). This
+ * script runs BEFORE the NiimBlue app (module scripts are deferred), so it can
+ * preselect that size by writing NiimBlue's own "last_label_props" entry in
+ * localStorage. Done once per detected roll/size, so a size the user picks
+ * afterwards sticks. The print bar shows the detected label.
  */
 (function () {
   "use strict";
   var cfg = window.NIIMBLUE_HOST || {};
   var API = (cfg.apiBase || "api").replace(/\/$/, "");
+  var DIR = cfg.printDirection === "left" ? "left" : "top";
+
+  // --- detected label roll -> designer label size (before the app starts) ---
+  // Print direction "top": image width runs across the printhead; "left": the
+  // image is rotated, so its height does. Design at the WHOLE label size (like
+  // NiimBlue's own 50x30 preset = 400x240); the server centre-crops what is
+  // wider than the printhead, as the NIIMBOT app does.
+  function labelPx(L) {
+    var across = L && (L.full_across_px || L.across_px);
+    if (!across || !L.feed_px) return null;
+    return DIR === "left" ? { w: L.feed_px, h: across } : { w: across, h: L.feed_px };
+  }
+
+  function readLabelProps() {
+    try { return JSON.parse(localStorage.getItem("last_label_props") || "null"); } catch (e) { return null; }
+  }
+
+  var preselected = null;
+  (function preselectLabel(L) {
+    var px = labelPx(L);
+    if (!px) return;
+    var key = L.barcode + ":" + px.w + "x" + px.h + ":" + DIR;
+    try {
+      if (localStorage.getItem("nbhost_label_applied") === key) return;
+      var props = readLabelProps();
+      if (!props || typeof props !== "object") props = {};
+      props.printDirection = DIR;
+      props.size = { width: px.w, height: px.h };
+      localStorage.setItem("last_label_props", JSON.stringify(props));
+      localStorage.setItem("nbhost_label_applied", key);
+      preselected = (L.name || L.barcode) + " (" + px.w + "x" + px.h + " px)";
+    } catch (e) { /* storage blocked: just show the label */ }
+  })(window.NIIMBLUE_LABEL);
 
   var CANVAS_SELECTORS = [
     "canvas.lower-canvas",        // fabric.js drawing layer (most builds)
@@ -125,8 +165,38 @@
         dot.title = "Printer (" + (s.transport || "?") + "): " + s.status +
           (s.detail ? " — " + s.detail : "") +
           (s.battery != null ? " | battery " + s.battery + "%" : "");
+        showLabel(s.label);
       })
       .catch(function () { dot.style.background = "#e53935"; dot.title = "Print server unreachable"; });
+  }
+
+  // --- detected label chip ---
+  var chip = document.createElement("span");
+  chip.style.cssText = "color:#cfd8dc;font:12px sans-serif;max-width:260px;overflow:hidden;" +
+    "text-overflow:ellipsis;white-space:nowrap;display:none;";
+
+  function showLabel(L) {
+    if (!L || !L.barcode) { chip.style.display = "none"; return; }
+    var px = labelPx(L);
+    var size = L.width_mm ? L.width_mm + "×" + L.height_mm + " mm" : "size unknown";
+    chip.textContent = "🏷 " + (L.name || L.barcode) + " · " + size +
+      (L.remaining != null ? " · " + L.remaining + " left" : "");
+    var tip = "Label roll in the printer: " + (L.name || "?") + "\nbarcode " + L.barcode +
+      (px ? "\nlabel " + px.w + "×" + px.h + " px (direction " + DIR + ")" : "") +
+      (L.clipped ? "\nwider than the printhead: " + L.crop_each_side_px + " px are cut on each side " +
+        "(printed " + L.width_px + "×" + L.height_px + " px)" : "") +
+      (L.remaining != null ? "\n" + L.remaining + " of " + L.total + " labels left" : "") +
+      "\nsize source: " + (L.source || "none (no auto size)");
+    chip.style.color = "#cfd8dc";
+    var props = readLabelProps();
+    if (px && props && props.size && (props.size.width !== px.w || props.size.height !== px.h)) {
+      chip.style.color = "#ffb300";
+      tip += "\n\nDesigner canvas is " + props.size.width + "×" + props.size.height +
+        " px; prints are scaled to the label (image_fit) unless label_width/height are set." +
+        "\nTo design 1:1, set the label size to " + px.w + "×" + px.h + " px.";
+    }
+    chip.title = tip;
+    chip.style.display = "";
   }
 
   // --- UI: floating button + quantity ---
@@ -148,13 +218,15 @@
     "cursor:pointer;border:none;border-radius:6px;padding:8px 12px;" +
     "background:#00b8d4;color:#001318;font-weight:600;";
 
-  bar.appendChild(dot); bar.appendChild(qty); bar.appendChild(btn);
+  bar.appendChild(dot); bar.appendChild(chip); bar.appendChild(qty); bar.appendChild(btn);
 
   function mount() {
     if (document.body) document.body.appendChild(bar);
     else setTimeout(mount, 300);
   }
   mount();
+  showLabel(window.NIIMBLUE_LABEL);
+  if (preselected) setTimeout(function () { toast("Label size set to the detected roll: " + preselected, true); }, 1500);
   refreshStatus();
   setInterval(refreshStatus, 10000);
 })();

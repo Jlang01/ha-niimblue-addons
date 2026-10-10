@@ -8,10 +8,16 @@
 #
 # timeout: rest_command defaults to 10 s. A Bluetooth print that first has to
 # connect, or a multi-copy job, takes longer -> keep 120.
+#
+# Size: no labelWidth/labelHeight here on purpose -> the add-on fits the image
+# to the label roll it detected in the printer (or the label_width/height
+# options, if set). Add "labelWidth": 384, "labelHeight": 240 to force a size.
+# imageFit may be left out too: it then follows the image_fit option.
 
 rest_command:
   # Print an image already reachable by URL (e.g. a generated label PNG).
-  # printTask omitted on purpose -> the add-on's `model` option (or auto-detect).
+  # printTask omitted on purpose -> the add-on's `model` option (or auto-detect;
+  # B21S -> B1).
   niimblue_print_url:
     url: "http://192.168.x.x:5000/print"
     method: POST

@@ -3,6 +3,28 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.2.0
+- **Label auto-size.** On connect the add-on reads the label roll's RFID tag
+  and resolves its size by barcode: from the local cache
+  (`/data/labels.json`), else once from NIIMBOT's cloud (only the barcode is
+  sent, 8 s timeout, never blocks or fails a print). With `label_width` /
+  `label_height` at 0, prints without an explicit size are fitted to the
+  detected label (`image_fit`). Explicit option/request sizes still win.
+  New option `label_lookup` (default on) disables the cloud lookup.
+- Images are fitted to the whole label (e.g. 400×240 px for a 50×30 mm roll)
+  and anything wider than the printhead (384 px on the B21) is centre-cropped,
+  like the NIIMBOT app, instead of being sent overwide.
+- `label_width`, `label_height`, `image_fit` now apply on the server, so they
+  also cover REST/automation prints, not only the designer's print bar.
+- **B21S prints with the B1 print task when `model` is empty.** niimbluelib
+  auto-detects D110 for the B21S, which prints blank labels.
+- `GET /status` has a `label` object (name, size in mm and px, remaining,
+  total, source); `/info` shows the print task actually used.
+- MQTT: new **Label** (name; size etc. as attributes) and **Labels remaining**
+  sensors.
+- Designer: the print bar shows the detected label (name, size, labels left)
+  and the designer preselects its size once per newly detected roll.
+
 ## 1.1.1
 - **MQTT entities actually appear.** The Supervisor token is now also read from
   s6's container environment, the broker lookup retries for a minute at boot,

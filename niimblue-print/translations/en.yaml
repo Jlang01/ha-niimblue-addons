@@ -16,15 +16,26 @@ configuration:
   model:
     name: Printer model (printTask)
     description: >-
-      Print task name (B1, D110, ...). Empty = auto-detect on connect. Over
-      Bluetooth auto-detect works (B21S -> D110). B1 is known to print on the
-      B21S over USB.
+      Print task name (B1, D110, ...). B1 is the one that prints on the B21S
+      (USB and Bluetooth). Empty = auto-detect on connect; for the B21S the
+      add-on then uses B1 too, because niimbluelib's auto-detected D110
+      prints blank labels on it.
   label_width:
     name: Label width (px)
-    description: 0 = use the designed image's own width. B21 printhead max = 384.
+    description: >-
+      Fixed print image width. Leave width AND height at 0 for auto: fit
+      prints to the label roll detected in the printer (RFID), or use the
+      image as is when no roll is detected. B21 printhead max = 384.
   label_height:
     name: Label height (px)
-    description: 0 = use the designed image's own height.
+    description: Fixed print image height. 0 (with width 0) = auto, see above.
+  label_lookup:
+    name: Look up label size online
+    description: >-
+      The roll's RFID tag holds a barcode but no size. When on, the size is
+      fetched once per roll type from NIIMBOT's cloud (print.niimbot.com) and
+      cached in the add-on. Only the roll's barcode is sent. Off = only
+      sizes already cached are used.
   print_direction:
     name: Print direction
     description: top or left. B21 default is top.
@@ -51,7 +62,9 @@ configuration:
       keeps the printer awake).
   mqtt_enabled:
     name: Enable MQTT discovery
-    description: Publish connected/status/battery/reconnect entities to Home Assistant.
+    description: >-
+      Publish connected/status/battery/label/labels-remaining/reconnect
+      entities to Home Assistant.
   log_level:
     name: Log level
     description: trace, debug, info, warning or error.

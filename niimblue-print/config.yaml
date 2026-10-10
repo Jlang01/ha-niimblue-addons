@@ -1,7 +1,7 @@
 # Home Assistant add-on manifest
 # Local add-on: NiimBlue Print Server
 name: NiimBlue Print
-version: "1.1.1"
+version: "1.2.0"
 slug: niimblue_print
 description: >-
   NIIMBOT label designer (NiimBlue) + persistent host-side print server.
@@ -45,10 +45,12 @@ host_dbus: true
 options:
   transport: serial
   address: ""            # serial: /dev/serial/by-id/... ; ble: MAC or BLE name; "" = auto
-  model: "B1"            # printTask. B21/B21_C2B use the B1 task (384px head). Info
-                         # auto-detect times out over serial on B21S, so hard-set it.
-  label_width: 0         # px; 0 = use the designer image's own size. B21 printhead max = 384
+  model: "B1"            # printTask. B21S/B21_C2B print with B1 (USB and BLE). Empty =
+                         # auto-detect; the server forces B1 on B21S/B21S_C2B because
+                         # niimbluelib's D110 prints blank labels there.
+  label_width: 0         # px; 0/0 = auto: detected label roll (RFID), else the image's own size
   label_height: 0
+  label_lookup: true     # look up the roll size by its RFID barcode at NIIMBOT's cloud (sends only the barcode)
   print_direction: top   # top | left
   density: 3
   threshold: 128
@@ -63,6 +65,7 @@ schema:
   model: str?
   label_width: int(0,)
   label_height: int(0,)
+  label_lookup: bool
   print_direction: list(top|left)
   density: int(1,5)
   threshold: int(1,255)

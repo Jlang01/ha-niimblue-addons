@@ -50,5 +50,13 @@ If HA shows an old "Neueste Version" after a push:
 - print-server.js imports niimblue-node internals (printImages, ImageEncoder,
   loaders) — niimblue-node is pinned; re-test before bumping it.
 - B21S facts: BLE name `B21S-C2BF926031720`, LE-only random address
-  `C3:F9:26:03:17:20`, model B21S_C2B, auto print task D110 over BLE. No
-  pairing needed. niimprint (Classic) prints blank labels on it.
+  `C3:F9:26:03:17:20`, model B21S_C2B. Print task **B1** (USB and BLE);
+  niimbluelib auto-detects D110, which prints BLANK labels on it (verified
+  2026-10-10) -> print-server.js `PRINT_TASK_OVERRIDES` forces B1 when no
+  task is configured. No pairing needed. niimprint (Classic) prints blank
+  labels on it.
+- Label auto-size: RFID barcode -> NIIMBOT cloud `getCloudTemplateByOneCode`
+  -> `/data/labels.json`; geometry + across-head rule in `label-size.js`
+  (pure, exported: `labelCanvas`, `centreCropAcross`, `blindZone` — reuse it,
+  don't duplicate size math). Overwidth is centre-cropped like the app
+  (50 mm roll = 400 px -> 384 px head, 8 px cut each side).

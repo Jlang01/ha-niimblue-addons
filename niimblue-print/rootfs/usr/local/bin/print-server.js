@@ -16,6 +16,9 @@
  *     after an idle period so the radio and the printer battery are not held.
  *   - One job at a time: designer + automations cannot interleave packets.
  *   - GET /status: one explicit connection state for MQTT and the designer.
+ *   - Label auto-size: reads the roll's RFID barcode on connect, resolves the
+ *     label size (local cache /data/labels.json, else NIIMBOT's cloud) and,
+ *     when no size is configured or requested, fits prints to it.
  *
  * API-compatible with `niimblue-cli server` for /connect /disconnect
  * /connected /info /rfid /print /scan, so existing rest_commands keep working.
@@ -36,10 +39,12 @@ const lib = nbRequire("@mmote/niimbluelib");
 const { z } = nbRequire("zod");
 const { Mutex } = nbRequire("async-mutex");
 const sharp = nbRequire("sharp");
+const labelSize = require(path.join(__dirname, "label-size.js"));
 
 // ---- config (env from run.sh) ------------------------------------------
 const env = (k, d) => (process.env[k] === undefined || process.env[k] === "" ? d : process.env[k]);
 const int = (v, d) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : d);
+const bool = (v, d) => (v === undefined || v === "" ? d : !/^(false|0|no|off)$/i.test(String(v)));
 const CFG = {
   transport: env("TRANSPORT", "serial") === "ble" ? "ble" : "serial",
   address: env("ADDRESS", ""),               // tty path | BLE MAC or name | "" = auto
@@ -49,7 +54,15 @@ const CFG = {
   host: env("HOST", "0.0.0.0"),
   port: int(env("PORT", "5000"), 5000),
   debug: /^(debug|trace)$/.test(env("LOG_LEVEL", "info")),
+  // Size/fit defaults from the add-on options. 0/0 = auto (detected label).
+  labelWidth: Math.max(0, int(env("LABEL_WIDTH", "0"), 0)),
+  labelHeight: Math.max(0, int(env("LABEL_HEIGHT", "0"), 0)),
+  imageFit: env("IMAGE_FIT", "contain"),
+  printDirection: env("PRINT_DIRECTION", "top") === "left" ? "left" : "top",
+  labelLookup: bool(env("LABEL_LOOKUP", "true"), true),   // NIIMBOT cloud lookup by roll barcode
+  labelsFile: env("LABELS_FILE", "/data/labels.json"),
 };
+if (!["contain", "cover", "fill", "inside", "outside"].includes(CFG.imageFit)) CFG.imageFit = "contain";
 if (CFG.printTask && !lib.printTaskNames.includes(CFG.printTask)) {
   console.warn(`[niimblue:server] unknown model/printTask '${CFG.printTask}', ignoring ` +
     `(valid: ${lib.printTaskNames.join(", ")})`);
@@ -91,6 +104,8 @@ const state = {
   lastConnectedAt: null,
   lastPrintAt: null,
   lastPrintOk: null,
+  label: null,            // roll from RFID: {barcode, uuid, serial, total, used, seenAt, tpl, source}
+  meta: null,             // {model, dpi, printheadPixels, printDirection} of the last connected printer
 };
 const lock = new Mutex();   // serializes connect / disconnect / print / scan
 
@@ -182,6 +197,211 @@ async function resolveBle() {
   return hit.address;
 }
 
+// ---- label detection (RFID barcode -> size) ----------------------------
+// The roll's RFID tag carries a barcode and the label counters, but no size
+// (printers don't report it). NIIMBOT's app gets the size from the cloud by
+// barcode; we do the same once per barcode and cache it in /data/labels.json.
+// Only the barcode is sent. Never blocks/fails a print: no answer = no
+// auto size. Geometry rule + evidence: label-size.js.
+const CLOUD_URL = "https://print.niimbot.com/api/template/getCloudTemplateByOneCode";
+const CLOUD_TIMEOUT_MS = 8000;
+const CLOUD_RETRY_MS = 5 * 60 * 1000;        // network error: retry on a later connect
+const CLOUD_MISS_MS = 24 * 3600 * 1000;      // unknown barcode: don't ask again for a day
+const RFID_FETCH_TIMEOUT_MS = 8000;
+
+const labelDb = { labels: {}, current: null, printer: null };
+const lookups = new Map();   // barcode -> in-flight cloud lookup promise
+const lookupBackoff = new Map();  // barcode -> do not retry before (ms)
+let lastSavedDb = null;
+
+function loadLabelDb() {
+  try {
+    const d = JSON.parse(fs.readFileSync(CFG.labelsFile, "utf8"));
+    if (d && typeof d.labels === "object" && d.labels) labelDb.labels = d.labels;
+    if (d && d.current && d.current.barcode) labelDb.current = d.current;
+    if (d && d.printer) labelDb.printer = d.printer;
+  } catch (e) {
+    if (e.code !== "ENOENT") log(`label cache ${CFG.labelsFile} unreadable, starting empty: ${msg(e)}`);
+  }
+  if (labelDb.printer) state.meta = labelDb.printer;
+  // Last roll seen: shown in /status until the printer reports again (a new
+  // connect re-reads the tag before any auto-sized print).
+  const cur = labelDb.current;
+  if (cur) {
+    const tpl = labelDb.labels[cur.barcode] || null;
+    state.label = { ...cur, tpl, source: tpl ? "cache" : null };
+  }
+}
+
+function saveLabelDb() {
+  try {
+    labelDb.current = state.label
+      ? { barcode: state.label.barcode, uuid: state.label.uuid, serial: state.label.serial,
+          total: state.label.total, used: state.label.used, seenAt: state.label.seenAt }
+      : null;
+    labelDb.printer = state.meta;
+    const data = JSON.stringify({ version: 1, ...labelDb }, null, 2);
+    if (data === lastSavedDb) return;   // BLE connects per print: skip no-op writes
+    fs.mkdirSync(path.dirname(CFG.labelsFile), { recursive: true });
+    const tmp = `${CFG.labelsFile}.tmp`;
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, CFG.labelsFile);
+    lastSavedDb = data;
+  } catch (e) {
+    log(`label cache write failed: ${msg(e)}`);
+  }
+}
+
+async function cloudLookup(barcode) {
+  if (typeof fetch !== "function") throw new Error("no fetch() in this Node.js");
+  const r = await fetch(CLOUD_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "niimbot-user-agent": "AppVersionName/999.0.0" },
+    body: JSON.stringify({ oneCode: barcode }),
+    signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  return labelSize.parseCloudTemplate(j && j.data);   // null = unknown barcode
+}
+
+/** Resolve the size for a barcode (cache, else cloud). Never throws. */
+function resolveLabel(barcode) {
+  const apply = (tpl, source) => {
+    if (state.label && state.label.barcode === barcode) {
+      state.label.tpl = tpl;
+      state.label.source = source;
+    }
+  };
+  const cached = labelDb.labels[barcode];
+  if (cached) {
+    // keep source "cloud" if this run fetched it; anything else is the cache
+    if (!state.label || state.label.tpl !== cached) apply(cached, "cache");
+    return Promise.resolve();
+  }
+  if (!CFG.labelLookup) return Promise.resolve();
+  if (lookups.has(barcode)) return lookups.get(barcode);
+  if ((lookupBackoff.get(barcode) || 0) > Date.now()) return Promise.resolve();
+  const p = cloudLookup(barcode).then((tpl) => {
+    if (!tpl) {
+      lookupBackoff.set(barcode, Date.now() + CLOUD_MISS_MS);
+      log(`label ${barcode}: unknown to the NIIMBOT cloud, no auto size`);
+      return;
+    }
+    tpl.fetched_at = iso();
+    labelDb.labels[barcode] = tpl;
+    apply(tpl, "cloud");
+    saveLabelDb();
+    log(`label ${barcode}: ${tpl.name || "?"} ${tpl.cloud_width_mm}x${tpl.cloud_height_mm} mm ` +
+      `(rotate ${tpl.rotate}) from NIIMBOT cloud`);
+  }, (e) => {
+    lookupBackoff.set(barcode, Date.now() + CLOUD_RETRY_MS);
+    log(`label ${barcode}: cloud lookup failed (${msg(e)}), no auto size for now`);
+  }).finally(() => lookups.delete(barcode));
+  lookups.set(barcode, p);
+  return p;
+}
+
+/** Feed an RFID read (niimbluelib CombinedRfidInfo) into the label state. */
+function onRfid(info) {
+  const t = info && info.labelRfidInfo;
+  if (!t) return;                       // read failed: keep the last known roll
+  if (!t.tagPresent || !t.barCode) {
+    if (state.label) log("no RFID label tag reported (no roll / non-NIIMBOT roll): auto size off");
+    state.label = null;
+    saveLabelDb();
+    return;
+  }
+  const barcode = String(t.barCode).trim();
+  if (!/^[0-9A-Za-z_.-]{1,64}$/.test(barcode)) { log(`ignoring odd RFID barcode '${barcode}'`); return; }
+  const same = state.label && state.label.barcode === barcode;
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
+  state.label = {
+    barcode,
+    uuid: t.uuid || null,
+    serial: t.serialNumber || null,
+    total: n(t.allPaper),
+    used: n(t.usedPaper),
+    seenAt: iso(),
+    tpl: same ? state.label.tpl : null,
+    source: same ? state.label.source : null,
+  };
+  if (!same) log(`label roll ${barcode} detected (${state.label.total ?? "?"} labels, ${state.label.used ?? "?"} used)`);
+  saveLabelDb();
+  resolveLabel(barcode);
+}
+
+/** Print canvas of the current roll for a print direction, or null. */
+function labelGeometry(printDirection) {
+  if (!state.label || !state.label.tpl) return null;
+  const meta = state.meta || {};
+  return labelSize.labelCanvas(state.label.tpl, {
+    printheadPx: meta.printheadPixels, dpi: meta.dpi, printDirection,
+  });
+}
+
+function labelStatus() {
+  const L = state.label;
+  if (!L) return null;
+  const g = labelGeometry(CFG.printDirection);
+  const remaining = L.total !== null && L.used !== null ? Math.max(0, L.total - L.used) : null;
+  return {
+    barcode: L.barcode,
+    name: L.tpl ? L.tpl.name : null,
+    width_mm: g ? g.width_mm : null,
+    height_mm: g ? g.height_mm : null,
+    width_px: g ? g.width_px : null,
+    height_px: g ? g.height_px : null,
+    remaining,
+    total: L.total,
+    source: L.tpl ? L.source : null,
+    // extras: orientation details for the numbers above
+    print_direction: CFG.printDirection,
+    across_mm: g ? g.across_mm : null,
+    feed_mm: g ? g.feed_mm : null,
+    across_px: g ? g.across_px : null,
+    feed_px: g ? g.feed_px : null,
+    // whole label (design size); prints are centre-cropped to width/height_px
+    label_width_px: g ? g.label_width_px : null,
+    label_height_px: g ? g.label_height_px : null,
+    full_across_px: g ? g.full_across_px : null,
+    clipped: g ? g.clipped : null,
+    crop_each_side_px: g ? g.crop_each_side_px : null,
+    blind_zone: g ? g.blind_zone : null,
+    dpi: g ? g.dpi : null,
+    serial: L.serial,
+    seen_at: L.seenAt,
+    lookup: CFG.labelLookup ? (lookups.has(L.barcode) ? "pending" : "on") : "off",
+  };
+}
+
+// ---- print task --------------------------------------------------------
+// niimbluelib 0.47 (niimblue-node 1.4.1) maps B21S / B21S_C2B to the D110
+// print task. Verified 2026-10-10 on a real B21S_C2B over BLE from HA: D110
+// prints BLANK labels, B1 prints correctly. So, when no task is configured,
+// override the auto-detected task for these models. B21S_C2B is verified;
+// B21S (same family, same D110 mapping in niimbluelib) is not.
+// Other B21 variants already get non-D110 tasks from niimbluelib.
+const PRINT_TASK_OVERRIDES = { B21S_C2B: "B1", B21S: "B1" };
+let overrideLogged = null;
+
+/** Print task to use when the request does not name one. */
+function autoPrintTask(c) {
+  if (CFG.printTask) return CFG.printTask;
+  const detected = c.getPrintTaskType();
+  const model = c.getModelMetadata()?.model;
+  const forced = model && PRINT_TASK_OVERRIDES[model];
+  if (forced && lib.printTaskNames.includes(forced)) {
+    if (overrideLogged !== model) {
+      overrideLogged = model;
+      log(`model ${model}: using print task ${forced} instead of auto-detected ${detected ?? "none"} ` +
+        "(D110 prints blank labels on the B21S; set 'model' to override)");
+    }
+    return forced;
+  }
+  return detected;
+}
+
 // ---- connection ---------------------------------------------------------
 function makeClient(address) {
   const c = CFG.transport === "ble" ? new lib.NiimbotNodeBleClient() : new lib.NiimbotNodeSerialClient();
@@ -195,6 +415,11 @@ function makeClient(address) {
   c.on("heartbeat", () => {
     const b = c.getPrinterInfo().batteryPercents;
     if (b !== undefined) state.battery = b;
+  });
+  // niimbluelib reads the RFID tag during connect, after each print and when
+  // the heartbeat sees the lid/roll change; every read lands here.
+  c.on("rfidinfofetched", (e) => {
+    if (state.client === c) onRfid(e.info);
   });
   // niimbluelib itself drops the link after HEARTBEAT_MAX_FAILS misses.
   c.on("heartbeatfailed", (e) => {
@@ -283,8 +508,24 @@ async function connectNow(reason) {
   state.lastActivity = Date.now();
   const info = c.getPrinterInfo();
   if (info.batteryPercents !== undefined) state.battery = info.batteryPercents;
-  state.model = c.getModelMetadata()?.model ?? state.model;
+  const meta = c.getModelMetadata();
+  state.model = meta?.model ?? state.model;
+  if (meta) {
+    state.meta = { model: meta.model, dpi: meta.dpi, printheadPixels: meta.printheadPixels, printDirection: meta.printDirection };
+  }
   setStatus("connected", `${CFG.transport} ${address}${state.model ? " (" + state.model + ")" : ""}`);
+  autoPrintTask(c);   // logs a model override once
+  // Label roll: connect() already read the tag (-> rfidinfofetched -> onRfid).
+  // On an explicit (re)connect, read it again if that read came back empty.
+  // A print never waits for this.
+  const rfid = c.getRfidInfo();
+  if (rfid && rfid.labelRfidInfo) {
+    onRfid(rfid);
+  } else if (reason === "manual") {
+    await withTimeout(c.fetchRfidInfo(), RFID_FETCH_TIMEOUT_MS, "RFID read")
+      .catch((e) => log(`RFID read: ${msg(e)}`));
+  }
+  if (meta) saveLabelDb();
 }
 
 /** Caller must hold `lock`. */
@@ -350,35 +591,69 @@ const PrintSchema = z.object({
   threshold: z.number().min(1).max(255).default(128),
   imagePosition: z.enum(["centre", "center", "top", "right top", "right", "right bottom",
     "bottom", "left bottom", "left", "left top"]).default("center"),
-  imageFit: z.enum(["contain", "cover", "fill", "inside", "outside"]).default("contain"),
+  imageFit: z.enum(["contain", "cover", "fill", "inside", "outside"]).optional(),  // default: image_fit option
   waitUntilFinished: z.boolean().default(true),
 }).refine(({ imageUrl, imageBase64, pages }) => (!!imageUrl || !!imageBase64) !== !!pages,
   { message: "Provide either imageUrl/imageBase64 or pages, but not both", path: ["image"] })
   .refine(({ imageUrl, imageBase64 }) => !(imageUrl && imageBase64),
     { message: "imageUrl or imageBase64 must be defined, not both", path: ["image"] });
 
-async function prepareImage(o, imageBase64, imageUrl) {
-  let image = imageBase64 !== undefined
+/** Load + flatten. Materialized now so a bad image fails BEFORE we touch the printer. */
+async function loadImage(imageBase64, imageUrl) {
+  const image = imageBase64 !== undefined
     ? await nb.loadImageFromBase64(imageBase64)
     : await nb.loadImageFromUrl(imageUrl);
-  image = image.flatten({ background: "#fff" });
-  if (o.labelWidth !== undefined && o.labelHeight !== undefined) {
-    image = image.resize(o.labelWidth, o.labelHeight, {
-      kernel: sharp.kernel.nearest, fit: o.imageFit, position: o.imagePosition, background: "#fff",
-    });
+  return image.flatten({ background: "#fff" }).png().toBuffer();
+}
+
+/**
+ * Resize to `size` (if any), centre-crop the across-head side to the
+ * printhead if wider (like the NIIMBOT app; e.g. a 50 mm label = 400 px on a
+ * 384 px head loses 8 px each side), threshold.
+ */
+async function finishImage(o, buf, size, printDirection, printheadPx) {
+  let image = sharp(buf);
+  if (size) {
+    image = sharp(await image.resize(size.width, size.height, {
+      kernel: sharp.kernel.nearest, fit: o.imageFit ?? CFG.imageFit, position: o.imagePosition, background: "#fff",
+    }).png().toBuffer());
   }
-  // Materialize now so a bad image fails BEFORE we touch the printer.
-  const buf = await image.threshold(o.threshold).png().toBuffer();
-  return sharp(buf);
+  const { width, height } = await image.metadata();
+  const crop = labelSize.centreCropAcross(width, height, printDirection, printheadPx);
+  if (crop) {
+    log(`image ${width}x${height} is wider than the ${printheadPx} px head: centre-cropped to ${crop.width}x${crop.height}`);
+    image = image.extract(crop);
+  }
+  return sharp(await image.threshold(o.threshold).png().toBuffer());
+}
+
+/**
+ * Target image size, by precedence: request labelWidth+labelHeight > the
+ * label_width/label_height options > the detected label roll > none (image as
+ * is). A request/options setting only ONE side keeps the old behaviour (no
+ * resize) and disables auto size.
+ */
+function targetSize(o, printDirection) {
+  if (o.labelWidth !== undefined || o.labelHeight !== undefined) {
+    return o.labelWidth !== undefined && o.labelHeight !== undefined
+      ? { width: o.labelWidth, height: o.labelHeight, from: "request" } : null;
+  }
+  if (CFG.labelWidth > 0 || CFG.labelHeight > 0) {
+    return CFG.labelWidth > 0 && CFG.labelHeight > 0
+      ? { width: CFG.labelWidth, height: CFG.labelHeight, from: "options" } : null;
+  }
+  // Fit to the WHOLE label; finishImage() then centre-crops to the head.
+  const g = labelGeometry(printDirection);
+  return g ? { width: g.label_width_px, height: g.label_height_px, from: `label ${state.label.tpl.name || state.label.barcode}` } : null;
 }
 
 async function handlePrint(body) {
   const o = PrintSchema.parse(body);
   const inputs = o.pages ?? [{ imageBase64: o.imageBase64, imageUrl: o.imageUrl, quantity: o.quantity }];
-  const images = [];
+  const loaded = [];
   for (const p of inputs) {
     try {
-      images.push({ image: await prepareImage(o, p.imageBase64, p.imageUrl), quantity: p.quantity });
+      loaded.push({ buf: await loadImage(p.imageBase64, p.imageUrl), quantity: p.quantity });
     } catch (e) {
       throw new RestError(`bad image: ${msg(e)}`, 400);
     }
@@ -392,10 +667,25 @@ async function handlePrint(body) {
     state.lastActivity = Date.now();
     const c = state.client;
     const printDirection = o.printDirection ?? c.getModelMetadata()?.printDirection;
-    const printTask = o.printTask ?? (CFG.printTask || c.getPrintTaskType());
+    const printTask = o.printTask ?? autoPrintTask(c);
     if (!printTask) throw new RestError("Unable to detect print task; set 'model' in the add-on options", 400);
+    // Size AFTER connecting: connect() has just read the roll's RFID tag. A
+    // cloud lookup for a brand-new roll may still be running; it is capped at
+    // CLOUD_TIMEOUT_MS and its failure only means "no auto size".
+    const pending = state.label && lookups.get(state.label.barcode);
+    const auto = o.labelWidth === undefined && o.labelHeight === undefined && !CFG.labelWidth && !CFG.labelHeight;
+    if (pending && auto) await pending;
+    // niimblue-node's encoder treats an undefined direction as "left".
+    const size = targetSize(o, printDirection || "left");
+    if (size && size.from !== "request") log(`image size ${size.width}x${size.height} px (${size.from})`);
     const pages = [];
-    for (const { image, quantity } of images) {
+    for (const { buf, quantity } of loaded) {
+      let image;
+      try {
+        image = await finishImage(o, buf, size, printDirection || "left", c.getModelMetadata()?.printheadPixels);
+      } catch (e) {
+        throw new RestError(`bad image: ${msg(e)}`, 400);
+      }
       pages.push({ encoded: await nb.ImageEncoder.encodeImage(image, lib.PageColorType.SingleColor, printDirection), quantity });
     }
     const copies = pages.reduce((n, p) => n + (p.quantity ?? o.quantity), 0);
@@ -456,7 +746,7 @@ function statusObj() {
     transport: CFG.transport,
     address: state.address || CFG.address || (state.bleFound && state.bleFound.address) || null,
     model: state.model,
-    print_task: CFG.printTask || (isConnected() ? state.client.getPrintTaskType() ?? null : null),
+    print_task: CFG.printTask || (isConnected() ? autoPrintTask(state.client) ?? null : null),
     battery: state.battery,
     on_demand: onDemand(),
     idle_disconnect_seconds: CFG.transport === "ble" ? CFG.idleS : null,
@@ -465,6 +755,8 @@ function statusObj() {
     last_connected_at: state.lastConnectedAt,
     last_print_at: state.lastPrintAt,
     last_print_ok: state.lastPrintOk,
+    label: labelStatus(),
+    label_lookup: CFG.labelLookup,
   };
 }
 
@@ -476,6 +768,12 @@ function assertConnected() {
 const routes = {
   "GET /": () => ({ message: "Server is working" }),
   "GET /status": () => statusObj(),
+  // Loaded by the designer page (sync <script>) before NiimBlue starts, so the
+  // injected glue can preselect the detected label size.
+  "GET /label.js": () => ({
+    raw: `window.NIIMBLUE_LABEL = ${JSON.stringify(labelStatus()).replace(/</g, "\\u003c")};\n`,
+    type: "application/javascript",
+  }),
   "GET /connected": () => ({ connected: isConnected() }),
   "GET /info": () => {
     assertConnected();
@@ -483,6 +781,7 @@ const routes = {
       printerInfo: state.client.getPrinterInfo(),
       modelMetadata: state.client.getModelMetadata(),
       detectedPrintTask: state.client.getPrintTaskType(),
+      printTask: autoPrintTask(state.client) ?? null,   // what /print uses (after model overrides)
     };
   },
   "GET /rfid": async () => { assertConnected(); return state.client.fetchRfidInfo(); },
@@ -545,7 +844,13 @@ async function onRequest(req, res) {
   if (!route) return send(res, 404, { error: "Not found" });
   try {
     const body = req.method === "POST" ? await readBody(req) : {};
-    send(res, 200, await route(body));
+    const out = await route(body);
+    if (out && typeof out.raw === "string" && out.type) {
+      res.writeHead(200, { "Content-Type": out.type, "Cache-Control": "no-store" });
+      res.end(out.raw);
+      return;
+    }
+    send(res, 200, out);
   } catch (e) {
     if (e instanceof z.ZodError) {
       send(res, 400, { error: e.issues.map((i) => `${i.path.join("→")}: ${i.message}`).join("\n") });
@@ -561,11 +866,17 @@ async function onRequest(req, res) {
 // let a rejected promise take the server down.
 process.on("unhandledRejection", (e) => log(`unhandled rejection: ${msg(e)}`));
 
+loadLabelDb();
 const server = http.createServer((req, res) => { onRequest(req, res); });
 server.listen({ host: CFG.host, port: CFG.port }, () => {
   log(`listening on ${CFG.host}:${CFG.port} (transport=${CFG.transport}, ` +
     `address=${CFG.address || "auto"}, printTask=${CFG.printTask || "auto"}` +
-    `${CFG.transport === "ble" ? `, idle_disconnect=${CFG.idleS || "never"}s` : ""})`);
+    `${CFG.transport === "ble" ? `, idle_disconnect=${CFG.idleS || "never"}s` : ""}, ` +
+    `label size=${CFG.labelWidth || CFG.labelHeight ? `${CFG.labelWidth}x${CFG.labelHeight}` : "auto"}, ` +
+    `label lookup=${CFG.labelLookup ? "on" : "off"})`);
+  if (state.label) {
+    log(`last label roll: ${state.label.barcode}${state.label.tpl ? ` (${state.label.tpl.name || "?"}, cached size)` : ""}`);
+  }
   maintain();
   setInterval(() => { maintain().catch((e) => log(`maintain: ${msg(e)}`)); }, 2000);
 });

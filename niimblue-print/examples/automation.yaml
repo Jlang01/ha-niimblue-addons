@@ -9,6 +9,21 @@
         image_url: "https://your-host/labels/next.png"
         copies: 1
 
+# Example: warn when the label roll runs low (MQTT "Labels remaining" sensor,
+# from the roll's RFID tag; updates after each print).
+- alias: "NiimBlue labels running low"
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.niimblue_printer_labels_remaining   # adjust to your entity id
+      below: 20
+  actions:
+    - action: persistent_notification.create
+      data:
+        title: "Label printer"
+        message: >-
+          Only {{ states('sensor.niimblue_printer_labels_remaining') }} labels
+          left on the {{ states('sensor.niimblue_printer_label') }} roll.
+
 # Example: reconnect nudge (optional; the add-on already retries by itself)
 - alias: "NiimBlue keep-alive reconnect"
   triggers:

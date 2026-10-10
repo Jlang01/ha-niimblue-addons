@@ -9,7 +9,10 @@ via a REST call.
   BlueZ over D-Bus, so it shares the adapter with HA's Bluetooth integration.
 - Starts without the printer; hot-plug / reconnect with backoff.
 - Ingress UI (authenticated, no extra cert).
-- MQTT auto-discovery: connected, status, battery, reconnect button.
+- Label auto-size: reads the roll's RFID tag, looks the size up once (NIIMBOT
+  cloud, only the barcode is sent; cached) and fits prints to it.
+- MQTT auto-discovery: connected, status, battery, label, labels remaining,
+  reconnect button.
 
 ## Install
 

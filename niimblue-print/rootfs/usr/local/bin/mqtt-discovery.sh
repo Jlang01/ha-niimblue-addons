@@ -67,6 +67,25 @@ pub -r -t "homeassistant/sensor/niimblue/battery/config" -m "{
   \"state_topic\":\"$STATE\",\"value_template\":\"{{ value_json.battery }}\",
   \"availability_topic\":\"$AVAIL\",\"device\":$DEV }"
 
+# Label roll detected via RFID (+ size from cache / NIIMBOT cloud). State =
+# label name (else its size, else barcode); attributes = the whole label object.
+# "None" = unknown in HA (no roll detected yet / no RFID tag).
+pub -r -t "homeassistant/sensor/niimblue/label/config" -m "{
+  \"name\":\"Label\",\"unique_id\":\"niimblue_label\",\"icon\":\"mdi:label-outline\",
+  \"state_topic\":\"$STATE\",
+  \"value_template\":\"{% set l = value_json.label %}{% if not l %}None{% elif l.name %}{{ l.name }}{% elif l.width_mm %}{{ l.width_mm }}x{{ l.height_mm }} mm{% else %}{{ l.barcode }}{% endif %}\",
+  \"json_attributes_topic\":\"$STATE\",
+  \"json_attributes_template\":\"{{ (value_json.label or {}) | tojson }}\",
+  \"availability_topic\":\"$AVAIL\",\"device\":$DEV }"
+
+pub -r -t "homeassistant/sensor/niimblue/labels_remaining/config" -m "{
+  \"name\":\"Labels remaining\",\"unique_id\":\"niimblue_labels_remaining\",
+  \"icon\":\"mdi:label-multiple-outline\",\"unit_of_measurement\":\"labels\",
+  \"state_class\":\"measurement\",
+  \"state_topic\":\"$STATE\",
+  \"value_template\":\"{{ value_json.label.remaining if value_json.label and value_json.label.remaining is not none else None }}\",
+  \"availability_topic\":\"$AVAIL\",\"device\":$DEV }"
+
 pub -r -t "homeassistant/button/niimblue/reconnect/config" -m "{
   \"name\":\"Reconnect\",\"unique_id\":\"niimblue_reconnect\",
   \"command_topic\":\"$CMD_RECONNECT\",\"entity_category\":\"config\",

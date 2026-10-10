@@ -20,6 +20,7 @@ RECONNECT=$(opt reconnect_seconds 10)
 IDLE_DISCONNECT=$(jq -r 'if .idle_disconnect_seconds == null then 60 else .idle_disconnect_seconds end' "$OPT")
 # NB: jq '//' treats false as fallback-trigger, so read booleans explicitly.
 MQTT_ENABLED=$(jq -r 'if .mqtt_enabled == null then true else .mqtt_enabled end' "$OPT")
+LABEL_LOOKUP=$(jq -r 'if .label_lookup == null then true else .label_lookup end' "$OPT")
 LOG_LEVEL=$(opt log_level info)
 
 # The printer may be off / unplugged / out of range at start: that is fine.
@@ -78,6 +79,14 @@ fi
 # (drops the Bluetooth link) before the container goes away.
 # Bind 0.0.0.0 so HA core rest_command can also reach it on :5000.
 export HOST=0.0.0.0 PORT=5000
+# Size/fit defaults + label auto-size (label_width/height 0/0 = detected roll).
+export LABEL_WIDTH="${LW:-0}" LABEL_HEIGHT="${LH:-0}" IMAGE_FIT="$FIT" PRINT_DIRECTION="$DIR"
+export LABEL_LOOKUP LABELS_FILE=/data/labels.json
+if [ "$LABEL_LOOKUP" = "true" ]; then
+  log "Label size lookup: on (sends only the roll's RFID barcode to NIIMBOT's cloud, once per roll type)"
+else
+  log "Label size lookup: off (cached sizes in /data/labels.json still used)"
+fi
 log "Starting niimblue print server on :5000 ..."
 child=""
 stopping=0
