@@ -63,13 +63,19 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : Number.par
 const posNum = (v, max = 10000) => { const n = num(v); return Number.isFinite(n) && n > 0 && n <= max ? n : null; };
 
 /** English name from a cloud template's labelNames/names, else its plain name. */
+/** Cloud text is untrusted: no control characters, max 100 chars (MQTT state, logs). */
+const cleanName = (v) => {
+  const s = String(v).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+  return s || null;
+};
+
 function englishName(data) {
   for (const list of [data.labelNames, data.names]) {
     if (!Array.isArray(list)) continue;
     const en = list.find((n) => n && /^en\b/i.test(String(n.languageCode || "")) && n.name);
-    if (en) return String(en.name);
+    if (en) return cleanName(en.name);
   }
-  return data.name ? String(data.name) : null;
+  return data.name ? cleanName(data.name) : null;
 }
 
 /**

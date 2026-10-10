@@ -1,54 +1,79 @@
 # Add to configuration.yaml (or a !include). Lets HA automations print labels
-# through the add-on's printer connection (USB serial or Bluetooth LE).
+# through the add-on's print queue (USB or Bluetooth LE).
 #
-# HOST: the add-on exposes port 5000. Reach it either by:
-#   - the HA host IP:            http://192.168.x.x:5000
-#   - the local add-on hostname: http://local-niimblue_print:5000
-# Pick whichever resolves in your setup; IP is the safe default.
+# HOST: inside Home Assistant the add-on is reachable by its hostname = the
+# add-on slug with "-" instead of "_". Open the add-on in Settings -> Add-ons:
+# the page URL ends in e.g. ".../a0d7b954_niimblue_print" -> hostname
+# "a0d7b954-niimblue-print" (a locally copied add-on: "local-niimblue-print").
+# Port 5000 is NOT published on the host by default and not needed for this.
 #
-# timeout: rest_command defaults to 10 s. A Bluetooth print that first has to
-# connect, or a multi-copy job, takes longer -> keep 120.
+# api_token: if you set it in the add-on options, keep the headers: block
+# (store the token in secrets.yaml as niimblue_token: "Bearer <token>").
+# Without a token, delete the headers: blocks.
 #
-# Size: no labelWidth/labelHeight here on purpose -> the add-on fits the image
-# to the label roll it detected in the printer (or the label_width/height
-# options, if set). Add "labelWidth": 384, "labelHeight": 240 to force a size.
-# imageFit may be left out too: it then follows the image_fit option.
+# Answers: 200 = printed; 202 = queued (printer off / out of range), it prints
+# by itself once the printer is reachable; 4xx/5xx = error. The add-on answers
+# after wait_timeout (30 s) at the latest -> timeout 60 is plenty.
 
 rest_command:
-  # Print an image already reachable by URL (e.g. a generated label PNG).
-  # printTask omitted on purpose -> the add-on's `model` option (or auto-detect;
-  # B21S -> B1).
-  niimblue_print_url:
-    url: "http://192.168.x.x:5000/print"
-    method: POST
-    timeout: 120
-    content_type: "application/json"
-    payload: >-
-      {
-        "imageUrl": "{{ image_url }}",
-        "printDirection": "top",
-        "imageFit": "contain",
-        "quantity": {{ copies | default(1) }}
-      }
-
-  # Print a base64 PNG (e.g. built by a template / python_script / pyscript).
-  niimblue_print_base64:
-    url: "http://192.168.x.x:5000/print"
-    method: POST
-    timeout: 120
-    content_type: "application/json"
-    payload: >-
-      {
-        "imageBase64": "{{ image_b64 }}",
-        "printDirection": "top",
-        "quantity": {{ copies | default(1) }}
-      }
-
-  # Force a reconnect (the add-on options decide transport + address).
-  # The MQTT "Reconnect" button does the same.
-  niimblue_reconnect:
-    url: "http://192.168.x.x:5000/reconnect"
+  # Text label, laid out and sized to the detected roll by the add-on.
+  # Call with data: {lines: ["Mehl", "Type 405"], wrap: false, copies: 1}
+  niimblue_print_text:
+    url: "http://a0d7b954-niimblue-print:5000/print/text"
     method: POST
     timeout: 60
+    headers:
+      Authorization: !secret niimblue_token
+    content_type: "application/json"
+    payload: >-
+      {
+        "lines": {{ lines | default([]) | tojson }},
+        "wrap": {{ wrap | default(false) | tojson }},
+        "bold": {{ bold | default(false) | tojson }},
+        "qr": {{ qr | default('') | tojson }},
+        "quantity": {{ copies | default(1) | int }}
+      }
+
+  # Saved template with variables, e.g. data: {template: "Vorrat", vars: {name: "Zucker"}}
+  niimblue_print_template:
+    url: "http://a0d7b954-niimblue-print:5000/print/template/{{ template | urlencode }}"
+    method: POST
+    timeout: 60
+    headers:
+      Authorization: !secret niimblue_token
+    content_type: "application/json"
+    payload: >-
+      {"vars": {{ vars | default({}) | tojson }}, "quantity": {{ copies | default(1) | int }}}
+
+  # An image reachable by URL (http/https). printTask/size omitted on purpose:
+  # the add-on picks them (B21S -> B1, fitted to the detected roll).
+  niimblue_print_url:
+    url: "http://a0d7b954-niimblue-print:5000/print"
+    method: POST
+    timeout: 60
+    headers:
+      Authorization: !secret niimblue_token
+    content_type: "application/json"
+    payload: >-
+      {"imageUrl": {{ image_url | tojson }}, "quantity": {{ copies | default(1) | int }}}
+
+  # A base64 PNG (e.g. built by a python_script / pyscript).
+  niimblue_print_base64:
+    url: "http://a0d7b954-niimblue-print:5000/print"
+    method: POST
+    timeout: 60
+    headers:
+      Authorization: !secret niimblue_token
+    content_type: "application/json"
+    payload: >-
+      {"imageBase64": {{ image_b64 | tojson }}, "quantity": {{ copies | default(1) | int }}}
+
+  # Force a reconnect. The MQTT "Reconnect" button does the same.
+  niimblue_reconnect:
+    url: "http://a0d7b954-niimblue-print:5000/reconnect"
+    method: POST
+    timeout: 60
+    headers:
+      Authorization: !secret niimblue_token
     content_type: "application/json"
     payload: "{}"

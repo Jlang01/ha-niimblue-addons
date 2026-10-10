@@ -2,24 +2,24 @@ configuration:
   transport:
     name: Transport
     description: >-
-      serial = USB cable (recommended when the printer is plugged into the HA
-      host). ble = Bluetooth LE through Home Assistant's own Bluetooth adapter
-      (shared with HA's Bluetooth integration, no pairing needed).
+      auto = a NIIMBOT plugged in by USB if there is one, else Bluetooth LE
+      (recommended). serial = USB cable only. ble = Bluetooth LE only, through
+      Home Assistant's own Bluetooth adapter (shared with HA's Bluetooth
+      integration, no pairing needed).
   address:
     name: Printer address
     description: >-
-      serial: device path, best a stable /dev/serial/by-id/... path. ble:
-      printer MAC (e.g. C3:F9:26:03:17:20) or Bluetooth name (e.g.
-      B21S-C2BF926031720). Leave empty to auto-detect (serial: NIIMBOT USB
-      device; ble: scan by name). The add-on also starts when the printer is
-      off and connects once it shows up.
+      Empty = find it: USB by NIIMBOT's USB id, Bluetooth by the printer's
+      name (B21S-…, B1-…, D110-…); a printer found over Bluetooth is
+      remembered. Or give a stable /dev/serial/by-id/... path (USB) or the
+      printer's Bluetooth MAC (e.g. C3:F9:26:03:17:20) or name. The add-on
+      also starts when the printer is off and connects once it shows up.
   model:
     name: Printer model (printTask)
     description: >-
-      Print task name (B1, D110, ...). B1 is the one that prints on the B21S
-      (USB and Bluetooth). Empty = auto-detect on connect; for the B21S the
-      add-on then uses B1 too, because niimbluelib's auto-detected D110
-      prints blank labels on it.
+      Print task name (B1, D110, ...). Empty = auto-detect on connect; for the
+      B21S the add-on uses B1, because niimbluelib's auto-detected D110 prints
+      blank labels on it.
   label_width:
     name: Label width (px)
     description: >-
@@ -38,33 +38,91 @@ configuration:
       sizes already cached are used.
   print_direction:
     name: Print direction
-    description: top or left. B21 default is top.
+    description: top or left (used for every print). B21 = top.
   density:
     name: Print density
-    description: Darkness 1-5 (B21 default 3).
+    description: >-
+      Darkness 1-5. 0 = the printer model's default (B21S: 3). Values outside
+      the model's range are clamped.
   threshold:
     name: B/W threshold
-    description: 1-255. Pixels above become black.
+    description: >-
+      1-255. Grey pixels darker than this print black; pixels at or above it
+      stay white.
   image_fit:
     name: Image fit
-    description: How the image is resized to the label (sharp fit modes).
+    description: How images are resized to the label (sharp fit modes).
+  disconnect_after_print:
+    name: Disconnect after printing
+    description: >-
+      Bluetooth: release the printer as soon as the print queue is empty
+      (saves the printer's battery and frees HA's Bluetooth). The next print
+      reconnects automatically (a few seconds).
+  idle_disconnect_seconds:
+    name: Bluetooth idle disconnect (s)
+    description: >-
+      Bluetooth: release a link that was opened otherwise (Reconnect button)
+      after this many idle seconds. 0 = keep the printer connected
+      permanently (holds an HA Bluetooth connection slot and keeps the
+      printer awake; only together with "Disconnect after printing" off).
   reconnect_seconds:
     name: Reconnect interval (s)
     description: >-
       Base retry interval while the printer is unreachable (backs off up to 5
       min) and MQTT status publish interval.
-  idle_disconnect_seconds:
-    name: Bluetooth idle disconnect (s)
+  wait_timeout:
+    name: Print wait (s)
     description: >-
-      ble only. Release the Bluetooth link after this many idle seconds; the
-      next print reconnects automatically (a few seconds). 0 = keep the
-      printer connected permanently (holds an HA Bluetooth connection slot and
-      keeps the printer awake).
+      How long a print request waits for the label to be printed. Printed in
+      time = answer 200; otherwise 202 with the job id: the job stays in the
+      queue and prints as soon as the printer is reachable.
+  queue_max_age_hours:
+    name: "Queue: drop jobs after (h)"
+    description: >-
+      Print jobs still waiting after this many hours are dropped (with a
+      notification) instead of printing much later. 0 = keep forever.
+  low_label_threshold:
+    name: Low labels warning below
+    description: >-
+      Create a Home Assistant notification (once per roll) when fewer labels
+      than this are left. 0 = off. Also drives the "Labels low" entity.
+  notifications:
+    name: Notifications
+    description: >-
+      Home Assistant persistent notifications for labels running low, low
+      printer battery (< 20 %) and dropped print jobs.
+  date_format:
+    name: Date format
+    description: >-
+      Format of {{date}} in text labels and templates. Tokens: YYYY YY MM M DD
+      D, e.g. DD.MM.YYYY.
+  time_format:
+    name: Time format
+    description: "Format of {{time}}. Tokens: HH H mm ss."
+  timezone:
+    name: Time zone
+    description: >-
+      For {{date}} / {{time}}, e.g. Europe/Berlin. Empty = Home Assistant's
+      time zone.
+  history_size:
+    name: Print history size
+    description: Number of recent prints kept for the History tab and reprints.
+  api_token:
+    name: API token
+    description: >-
+      Optional. When set, every API client except the sidebar must send
+      "Authorization: Bearer <token>" (rest_command headers). Set it whenever
+      port 5000 is mapped to the host.
   mqtt_enabled:
-    name: Enable MQTT discovery
+    name: Enable MQTT
     description: >-
-      Publish connected/status/battery/label/labels-remaining/reconnect
-      entities to Home Assistant.
+      Home Assistant entities via MQTT discovery (status, battery, label,
+      queue, quick print, buttons) and the niimblue/print topics for
+      automations. Needs the Mosquitto add-on.
   log_level:
     name: Log level
     description: trace, debug, info, warning or error.
+network:
+  5000/tcp: >-
+    REST print API for clients OUTSIDE Home Assistant only (HA automations use
+    the add-on's internal hostname). Set api_token when you map it.

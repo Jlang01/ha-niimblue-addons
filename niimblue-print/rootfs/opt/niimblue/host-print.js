@@ -14,11 +14,20 @@
  * preselect that size by writing NiimBlue's own "last_label_props" entry in
  * localStorage. Done once per detected roll/size, so a size the user picks
  * afterwards sticks. The print bar shows the detected label.
+ *
+ * Since 1.3 the designer runs in a frame of the sidebar shell (../index.html,
+ * which has the status bar), served from designer/; the API is ../api.
+ * Prints go through the add-on's queue: 202 = queued (printer unreachable),
+ * printed automatically later. "Save as template" stores the canvas as an
+ * image template.
  */
 (function () {
   "use strict";
   var cfg = window.NIIMBLUE_HOST || {};
-  var API = (cfg.apiBase || "api").replace(/\/$/, "");
+  var API = (cfg.apiBase || "../api").replace(/\/$/, "");
+  // inside the sidebar shell (which shows status + roll): keep the bar small
+  var inShell = false;
+  try { inShell = window.parent !== window && !!window.parent.NIIMBLUE_SHELL; } catch (e) { /* other origin */ }
   var DIR = cfg.printDirection === "left" ? "left" : "top";
 
   // --- detected label roll -> designer label size (before the app starts) ---
@@ -85,40 +94,33 @@
     setTimeout(function () { t.remove(); }, 5000);
   }
 
-  function print() {
+  /** Current label canvas as base64 PNG (niimbluelib pads columns itself). */
+  function exportCanvas() {
     var canvas = findCanvas();
-    if (!canvas) { toast("No label canvas found to print.", false); return; }
+    if (!canvas) { toast("No label canvas found.", false); return null; }
+    try { return { b64: canvas.toDataURL("image/png").replace(/^data:image\/\w+;base64,/, ""), w: canvas.width, h: canvas.height }; }
+    catch (e) { toast("Canvas export failed: " + e, false); return null; }
+  }
 
-    // The encoder packs 8 pixels per byte and requires the "column count" to be
-    // a multiple of 8. Which axis is "columns" depends on print direction (the
-    // image gets rotated), so pad BOTH width and height up to the next multiple
-    // of 8 with white (no scaling → no distortion).
-    var w = canvas.width, h = canvas.height;
-    var w8 = Math.ceil(w / 8) * 8;
-    var h8 = Math.ceil(h / 8) * 8;
-    var src = canvas;
-    if (w8 !== w || h8 !== h) {
-      var pad = document.createElement("canvas");
-      pad.width = w8; pad.height = h8;
-      var pctx = pad.getContext("2d");
-      pctx.fillStyle = "#ffffff";
-      pctx.fillRect(0, 0, w8, h8);
-      pctx.drawImage(canvas, 0, 0);
-      src = pad;
-    }
+  function readResponse(r) {
+    return r.text().then(function (t) {
+      var j = null;
+      try { j = JSON.parse(t); } catch (e) { /* nginx error page */ }
+      return { status: r.status, ok: r.ok, json: j, msg: (j && (j.error || j.message)) || t };
+    });
+  }
 
-    var dataUrl;
-    try { dataUrl = src.toDataURL("image/png"); }
-    catch (e) { toast("Canvas export failed: " + e, false); return; }
-
+  function print() {
+    var img = exportCanvas();
+    if (!img) return;
     var body = {
-      imageBase64: dataUrl.replace(/^data:image\/\w+;base64,/, ""),
+      imageBase64: img.b64,
       printDirection: cfg.printDirection || "top",
-      density: cfg.density || 3,
       threshold: cfg.threshold || 128,
       imageFit: cfg.imageFit || "contain",
       quantity: parseInt(document.getElementById("nb-qty").value, 10) || 1,
     };
+    if (cfg.density) body.density = cfg.density;
     if (cfg.model) body.printTask = cfg.model;
     if (cfg.labelWidth && cfg.labelWidth > 0) body.labelWidth = cfg.labelWidth;
     if (cfg.labelHeight && cfg.labelHeight > 0) body.labelHeight = cfg.labelHeight;
@@ -129,22 +131,41 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
-      // Read as text first — an nginx 502 returns HTML, not JSON, so we must
-      // not blindly JSON.parse (that produced the "unexpected character" error).
-      .then(function (r) { return r.text().then(function (t) { return { status: r.status, ok: r.ok, text: t }; }); })
+      // Read as text first: an nginx 502/504 returns HTML, not JSON.
+      .then(readResponse)
       .then(function (res) {
-        var msg = res.text;
-        try { var j = JSON.parse(res.text); msg = j.error || j.message || res.text; } catch (e) {}
-        if (res.ok) {
-          toast("Sent to printer ✓", true);
-        } else if (res.status === 502 || res.status === 504) {
+        if (res.status === 202) {
+          toast("Queued: " + res.msg, true);
+        } else if (res.ok) {
+          toast("Printed ✓", true);
+        } else if (res.status === 504) {
+          toast("Still printing or queued (request timed out). Check the queue before printing again.", false);
+        } else if (res.status === 502) {
           toast("Print server is down (restarting?). Check the add-on log.", false);
         } else {
-          toast("Print error (" + res.status + "): " + msg, false);
+          toast("Print error (" + res.status + "): " + res.msg, false);
         }
       })
       .catch(function (e) { toast("Request failed: " + e, false); })
       .finally(function () { btn.disabled = false; btn.textContent = "🖨 Print via host"; refreshStatus(); });
+  }
+
+  // --- save the canvas as an image template ---
+  function saveTemplate() {
+    var name = tplName.value.trim();
+    if (!name) { tplName.focus(); toast("Name the template first.", false); return; }
+    var img = exportCanvas();
+    if (!img) return;
+    var L = window.NIIMBLUE_LABEL || {};
+    var body = { type: "image", imageBase64: img.b64,
+      label: { name: L.name || null, width_px: img.w, height_px: img.h } };
+    if (cfg.density) body.density = cfg.density;
+    fetch(API + "/templates/" + encodeURIComponent(name), {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(readResponse).then(function (res) {
+      if (res.ok) { toast("Saved image template \"" + name + "\" (print it from the Templates tab)", true); tplBox.style.display = "none"; tplName.value = ""; }
+      else toast("Save failed: " + res.msg, false);
+    }).catch(function (e) { toast("Save failed: " + e, false); });
   }
 
   // --- printer state dot (GET api/status) ---
@@ -218,7 +239,31 @@
     "cursor:pointer;border:none;border-radius:6px;padding:8px 12px;" +
     "background:#00b8d4;color:#001318;font-weight:600;";
 
-  bar.appendChild(dot); bar.appendChild(chip); bar.appendChild(qty); bar.appendChild(btn);
+  // "Save as template": inline name field (prompt() is blocked in some HA app webviews)
+  var tplBox = document.createElement("span");
+  tplBox.style.cssText = "display:none;gap:4px;align-items:center;";
+  var tplName = document.createElement("input");
+  tplName.type = "text"; tplName.placeholder = "template name"; tplName.maxLength = 64;
+  tplName.style.cssText = "width:120px;padding:4px;border:none;border-radius:6px;";
+  tplName.addEventListener("keydown", function (e) { if (e.key === "Enter") saveTemplate(); });
+  var tplSave = document.createElement("button");
+  tplSave.textContent = "Save";
+  tplSave.onclick = saveTemplate;
+  tplSave.style.cssText = "cursor:pointer;border:none;border-radius:6px;padding:6px 10px;background:#cfd8dc;";
+  tplBox.appendChild(tplName); tplBox.appendChild(tplSave);
+  var tplBtn = document.createElement("button");
+  tplBtn.textContent = "💾";
+  tplBtn.title = "Save as template (image: printed as designed; for changing text use a text template from Quick print)";
+  tplBtn.onclick = function () {
+    var open = tplBox.style.display === "none";
+    tplBox.style.display = open ? "inline-flex" : "none";
+    if (open) tplName.focus();
+  };
+  tplBtn.style.cssText = "cursor:pointer;border:none;border-radius:6px;padding:7px 9px;background:#455a64;color:#fff;";
+
+  if (inShell) { dot.style.display = "none"; chip.style.maxWidth = "0"; }
+  bar.appendChild(dot); bar.appendChild(chip); bar.appendChild(tplBox); bar.appendChild(tplBtn);
+  bar.appendChild(qty); bar.appendChild(btn);
 
   function mount() {
     if (document.body) document.body.appendChild(bar);

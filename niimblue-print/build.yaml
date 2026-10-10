@@ -1,9 +1,12 @@
 # Base images per arch. Home Assistant Alpine bases (apk), matching the
-# Dockerfile which uses apk + musl-compiled native modules.
+# Dockerfile which uses apk + musl-compiled native modules. Pinned to the
+# Alpine release (3.24 = Node.js 24) so a base bump can't change the build
+# under us; bump deliberately and re-test.
+# armv7 is not offered: sharp (image processing) has no prebuilt binary for
+# musl on 32-bit ARM.
 build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base:latest
-  amd64: ghcr.io/home-assistant/amd64-base:latest
-  armv7: ghcr.io/home-assistant/armv7-base:latest
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.24
+  amd64: ghcr.io/home-assistant/amd64-base:3.24
 labels:
   org.opencontainers.image.title: "NiimBlue Print"
   org.opencontainers.image.source: "https://github.com/Jlang01/ha-niimblue-addons"

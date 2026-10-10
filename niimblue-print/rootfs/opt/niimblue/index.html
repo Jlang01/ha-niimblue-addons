@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NiimBlue Print</title>
+<!-- All URLs are relative: HA ingress serves this page under
+     /api/hassio_ingress/<token>/ (nginx also injects a matching <base>). -->
+<link rel="icon" href="designer/favicon.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="status" id="status" aria-live="polite">
+    <span class="dot" id="st-dot" title="Printer status"></span>
+    <span class="st-main" id="st-text">Loading…</span>
+    <span class="chip" id="st-battery" hidden></span>
+    <span class="chip" id="st-label" hidden></span>
+    <span class="chip" id="st-remaining" hidden></span>
+    <span class="chip" id="st-queue" hidden></span>
+    <button type="button" class="btn small" id="st-reconnect" title="Drop and re-open the printer connection">Reconnect</button>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="designer">Designer</button>
+    <button type="button" role="tab" data-tab="quick">Quick print</button>
+    <button type="button" role="tab" data-tab="templates">Templates</button>
+    <button type="button" role="tab" data-tab="history">History</button>
+    <button type="button" role="tab" data-tab="diag">Diagnostics</button>
+  </nav>
+</header>
+
+<main>
+  <!-- NiimBlue designer, unchanged, in its own frame (state survives tab switches) -->
+  <section class="tab" id="tab-designer" role="tabpanel">
+    <iframe id="designer" title="NiimBlue designer" src="about:blank"></iframe>
+  </section>
+
+  <section class="tab pad" id="tab-quick" role="tabpanel" hidden>
+    <div class="split">
+      <form class="card form" id="q-form" autocomplete="off">
+        <label class="field">
+          <span>Text <small>(one line per line; {{date}}, {{time}} work here too)</small></span>
+          <textarea id="q-text" rows="4" placeholder="Erdbeermarmelade&#10;{{date}}"></textarea>
+        </label>
+        <div class="row wrap">
+          <label class="check"><input type="checkbox" id="q-wrap"> Wrap long lines</label>
+          <label class="check"><input type="checkbox" id="q-bold"> Bold</label>
+          <label class="check"><input type="checkbox" id="q-border"> Border</label>
+        </div>
+        <div class="row wrap">
+          <div class="seg" id="q-align" role="radiogroup" aria-label="Alignment">
+            <button type="button" data-v="left" title="Left">Left</button>
+            <button type="button" data-v="center" title="Center" class="on">Center</button>
+            <button type="button" data-v="right" title="Right">Right</button>
+          </div>
+          <label class="inline">Font
+            <select id="q-fontmode"><option value="auto">auto</option><option value="fixed">fixed</option></select>
+            <input type="number" id="q-fontsize" min="8" max="400" value="40" hidden aria-label="Font size (px)">
+          </label>
+        </div>
+        <label class="field">
+          <span>QR code <small>(optional: URL, Wi-Fi string, …)</small></span>
+          <input type="text" id="q-qr" placeholder="https://…">
+        </label>
+        <div class="row">
+          <label class="field grow">
+            <span>Barcode <small>(optional)</small></span>
+            <input type="text" id="q-bc" placeholder="data">
+          </label>
+          <label class="field">
+            <span>Type</span>
+            <select id="q-bctype"><option value="code128">Code 128</option><option value="ean13">EAN-13</option></select>
+          </label>
+        </div>
+        <div class="row actions">
+          <label class="inline">Copies <input type="number" id="q-qty" min="1" max="100" value="1"></label>
+          <button type="submit" class="btn primary" id="q-print">Print</button>
+        </div>
+        <details class="save">
+          <summary>Save as template</summary>
+          <p class="hint">Saves this layout. Use <code>{{name}}</code>-style placeholders for parts that change, plus
+            <code>{{date}}</code>, <code>{{date+7}}</code>, <code>{{time}}</code>, <code>{{counter}}</code>.</p>
+          <div class="row">
+            <input type="text" id="q-tplname" placeholder="Template name" maxlength="64" class="grow">
+            <button type="button" class="btn" id="q-save">Save</button>
+          </div>
+        </details>
+      </form>
+      <div class="card preview">
+        <div class="preview-box"><img id="q-img" alt="Label preview"></div>
+        <p class="meta" id="q-meta"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab pad" id="tab-templates" role="tabpanel" hidden>
+    <div class="split">
+      <div class="card">
+        <div class="row between"><h2>Templates</h2><button type="button" class="btn small" id="t-refresh">Refresh</button></div>
+        <ul class="list" id="t-list"></ul>
+        <p class="hint" id="t-empty" hidden>No templates yet. Save one from <b>Quick print</b> (text, with
+          placeholders) or from the designer's print bar (<b>Save as template</b>, an image: printed exactly as
+          designed, no placeholders).</p>
+      </div>
+      <div class="card" id="t-detail" hidden>
+        <div class="row between"><h2 id="t-name"></h2><span class="badge" id="t-type"></span></div>
+        <p class="hint" id="t-desc"></p>
+        <div class="preview-box"><img id="t-img" alt="Template preview"></div>
+        <p class="meta" id="t-meta"></p>
+        <form class="form" id="t-form" autocomplete="off">
+          <div id="t-vars"></div>
+          <div class="row actions">
+            <label class="inline">Copies <input type="number" id="t-qty" min="1" max="100" value="1"></label>
+            <button type="submit" class="btn primary">Print</button>
+          </div>
+          <div class="row">
+            <button type="button" class="btn" id="t-edit">Edit in Quick print</button>
+            <button type="button" class="btn danger" id="t-delete">Delete</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab pad" id="tab-history" role="tabpanel" hidden>
+    <div class="row between"><h2>Last prints</h2>
+      <span><button type="button" class="btn small" id="h-refresh">Refresh</button>
+      <button type="button" class="btn small danger" id="h-clear">Clear</button></span></div>
+    <ul class="grid" id="h-list"></ul>
+    <p class="hint" id="h-empty" hidden>Nothing printed yet.</p>
+  </section>
+
+  <section class="tab pad" id="tab-diag" role="tabpanel" hidden>
+    <div class="split">
+      <div class="card">
+        <div class="row between"><h2>Print queue</h2>
+          <span><button type="button" class="btn small" id="d-qrefresh">Refresh</button>
+          <button type="button" class="btn small danger" id="d-qclear">Clear</button></span></div>
+        <p class="hint" id="d-qinfo"></p>
+        <ul class="list" id="d-queue"></ul>
+        <p class="hint" id="d-qempty" hidden>Nothing waiting. Prints that cannot reach the printer wait here and
+          print by themselves once it is back; a job that failed while printing is kept here for a manual retry.</p>
+      </div>
+      <div class="card">
+        <div class="row between"><h2>Printer</h2>
+          <span><button type="button" class="btn small" id="d-test">Test print</button>
+          <button type="button" class="btn small" id="d-scan">Scan</button></span></div>
+        <dl class="kv" id="d-kv"></dl>
+        <div id="d-scanres"></div>
+        <details>
+          <summary>Recent connection events</summary>
+          <ul class="events" id="d-events"></ul>
+        </details>
+        <details>
+          <summary>Raw diagnostics (JSON)</summary>
+          <pre class="raw" id="d-raw"></pre>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

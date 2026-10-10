@@ -1,0 +1,3 @@
+# keep host-built modules (glibc) out of the image: the Dockerfile runs npm ci
+rootfs/usr/local/lib/niimblue-print/node_modules
+tests

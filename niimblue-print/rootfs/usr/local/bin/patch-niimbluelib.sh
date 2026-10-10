@@ -9,10 +9,12 @@
 # Both are idempotent string patches on the readable CJS build.
 set -euo pipefail
 
-F=$(find /usr/local/lib/node_modules -path '*niimbluelib/dist/cjs/client/node_serial_impl.js' 2>/dev/null | head -1)
+# Runs at image build time (Dockerfile). Arg: node_modules root to search.
+ROOT=${1:-/usr/local/lib/niimblue-print/node_modules}
+F=$(find "$ROOT" -path '*niimbluelib/dist/cjs/client/node_serial_impl.js' 2>/dev/null | head -1)
 if [ -z "$F" ]; then
-  echo "[patch] node_serial_impl.js not found — skipping (layout changed?)"
-  exit 0
+  echo "[patch] node_serial_impl.js not found under $ROOT (niimbluelib layout changed?)"
+  exit 1
 fi
 echo "[patch] patching $F"
 

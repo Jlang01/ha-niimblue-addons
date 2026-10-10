@@ -4,10 +4,18 @@
 //   2. PrintPreview   -> the preview's own Print button prints VIA HOST
 //      (uses window.NIIMBLUE_HOST from our injected config.js), always enabled;
 //      the browser "system printer" button is removed.
-// Regex misses log a warning but don't fail the build (graceful degradation).
+// A patch that does not apply FAILS the build: otherwise the preview's Print
+// button would silently fall back to Web Bluetooth (which cannot reach the
+// printer on the HA host). NiimBlue is pinned in the Dockerfile; re-check
+// these anchors when bumping it.
 const fs = require("fs");
 
-function must(cond, msg) { if (!cond) console.warn("[patch-src] WARN:", msg); }
+function must(cond, msg) {
+  if (!cond) {
+    console.error("[patch-src] ERROR:", msg);
+    process.exit(1);
+  }
+}
 
 // 1) Silence the unsupported-browser banner ------------------------------
 const bw = "src/components/basic/BrowserWarning.svelte";
@@ -25,30 +33,22 @@ const hostFn = `  const onPrintViaHost = async () => {
     printState = "sending"; error = "";
     try {
       await generatePreviewData(0);
-      const w = previewCanvas.width, h = previewCanvas.height;
-      const w8 = Math.ceil(w / 8) * 8, h8 = Math.ceil(h / 8) * 8;
-      let out = previewCanvas;
-      if (w8 !== w || h8 !== h) {
-        const pad = document.createElement("canvas");
-        pad.width = w8; pad.height = h8;
-        const c = pad.getContext("2d");
-        c.fillStyle = "#ffffff"; c.fillRect(0, 0, w8, h8);
-        c.drawImage(previewCanvas, 0, 0);
-        out = pad;
-      }
+      // no padding needed: niimbluelib's encoder pads the columns to 8 itself
       const cfg = window.NIIMBLUE_HOST || {};
       const body = {
-        imageBase64: out.toDataURL("image/png").replace(/^data:image\\/\\w+;base64,/, ""),
+        imageBase64: previewCanvas.toDataURL("image/png").replace(/^data:image\\/\\w+;base64,/, ""),
         printDirection: labelProps.printDirection || "top",
         density,
         quantity,
       };
       if (cfg.model) body.printTask = cfg.model;
-      const r = await fetch((cfg.apiBase || "api") + "/print", {
+      const r = await fetch((cfg.apiBase || "../api") + "/print", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const t = await r.text();
-      if (!r.ok) { let m = t; try { m = JSON.parse(t).error || m; } catch (e) {} error = "Host print error: " + m; }
+      if (r.status === 202) { error = "Queued: the printer is not reachable right now, the label prints as soon as it is (see the Queue in the Diagnostics tab)."; }
+      else if (r.status === 504) { error = "Still printing or queued (the request timed out). Check the queue before printing again."; }
+      else if (!r.ok) { let m = t; try { m = JSON.parse(t).error || m; } catch (e) {} error = "Host print error: " + m; }
     } catch (e) { error = String(e); }
     printState = "idle";
   };

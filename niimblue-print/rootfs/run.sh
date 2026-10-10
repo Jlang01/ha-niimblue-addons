@@ -5,88 +5,93 @@ OPT=/data/options.json
 log() { echo "[niimblue] $*"; }
 
 # ---- read options -------------------------------------------------------
+# NB: jq '//' treats false AND 0 as "missing", so booleans and 0-able numbers
+# are read with an explicit null check.
 opt() { jq -r --arg d "$2" ".${1} // \$d" "$OPT"; }
-TRANSPORT=$(opt transport serial)
+optn() { jq -r --arg d "$2" "if .${1} == null then \$d else .${1} end" "$OPT"; }
+TRANSPORT=$(opt transport auto)
 ADDRESS=$(opt address "")
-MODEL=$(opt model "")   # empty = let the server auto-detect printTask on connect
-LW=$(opt label_width 0)
-LH=$(opt label_height 0)
+MODEL=$(opt model "")   # empty = auto-detect printTask on connect (B21S -> B1)
+LW=$(optn label_width 0)
+LH=$(optn label_height 0)
 DIR=$(opt print_direction top)
-DENSITY=$(opt density 3)
+DENSITY=$(optn density 0)          # 0 = the printer model's default
 THRESHOLD=$(opt threshold 128)
 FIT=$(opt image_fit contain)
 RECONNECT=$(opt reconnect_seconds 10)
-# NB: jq '//' treats false AND 0 as fallback-trigger; read 0-able ints explicitly.
-IDLE_DISCONNECT=$(jq -r 'if .idle_disconnect_seconds == null then 60 else .idle_disconnect_seconds end' "$OPT")
-# NB: jq '//' treats false as fallback-trigger, so read booleans explicitly.
-MQTT_ENABLED=$(jq -r 'if .mqtt_enabled == null then true else .mqtt_enabled end' "$OPT")
-LABEL_LOOKUP=$(jq -r 'if .label_lookup == null then true else .label_lookup end' "$OPT")
+IDLE_DISCONNECT=$(optn idle_disconnect_seconds 60)
+DISCONNECT_AFTER_PRINT=$(optn disconnect_after_print true)
+WAIT_TIMEOUT=$(optn wait_timeout 30)
+QUEUE_MAX_AGE_HOURS=$(optn queue_max_age_hours 24)
+MQTT_ENABLED=$(optn mqtt_enabled true)
+LABEL_LOOKUP=$(optn label_lookup true)
+LOW_LABEL_THRESHOLD=$(optn low_label_threshold 20)
+NOTIFICATIONS=$(optn notifications true)
+DATE_FORMAT=$(opt date_format "YYYY-MM-DD")
+TIME_FORMAT=$(opt time_format "HH:mm")
+TIMEZONE=$(opt timezone "")
+HISTORY_SIZE=$(optn history_size 20)
+API_TOKEN=$(opt api_token "")
 LOG_LEVEL=$(opt log_level info)
+
+# Bluetooth always through BlueZ over D-Bus (shared with HA's own Bluetooth),
+# never noble's raw-HCI binding, whatever the transport (auto / scan use it).
+export NOBLE_BINDINGS=dbus
+export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
 
 # The printer may be off / unplugged / out of range at start: that is fine.
 # The print server keeps looking for it and reports state on GET /status.
-if [ "$TRANSPORT" = "serial" ]; then
-  log "Transport: USB serial, device: ${ADDRESS:-auto-detect (NIIMBOT USB 3513:xxxx)}"
-  log "Serial devices visible now:"
-  found=0
-  for d in /dev/serial/by-id/* /dev/ttyACM* /dev/ttyUSB*; do
-    [ -e "$d" ] && { log "  $d"; found=1; }
+log "Transport: ${TRANSPORT}${ADDRESS:+, address $ADDRESS}"
+log "Serial devices visible now:"
+found=0
+for d in /dev/serial/by-id/* /dev/ttyACM* /dev/ttyUSB*; do
+  [ -e "$d" ] && { log "  $d"; found=1; }
+done
+[ "$found" = 1 ] || log "  (none)"
+if [ ! -S /run/dbus/system_bus_socket ]; then
+  log "Host D-Bus socket missing: Bluetooth cannot work (host_dbus not granted?)"
+fi
+
+# ---- designer config (read by the injected print bar), JSON-encoded --------
+jq -n \
+  --arg model "$MODEL" --arg dir "$DIR" --arg fit "$FIT" --arg transport "$TRANSPORT" \
+  --argjson lw "${LW:-0}" --argjson lh "${LH:-0}" --argjson density "${DENSITY:-0}" \
+  --argjson threshold "${THRESHOLD:-128}" \
+  '{model: $model, printDirection: $dir, labelWidth: $lw, labelHeight: $lh,
+    density: $density, threshold: $threshold, imageFit: $fit, transport: $transport,
+    apiBase: "../api"}' \
+  | { printf '// Generated at runtime from the add-on options. apiBase is relative to designer/.\nwindow.NIIMBLUE_HOST = '; cat; printf ';\n'; } \
+  > /opt/niimblue/config.js
+
+# ---- nginx (ingress), supervised in the background -----------------------
+(
+  while :; do
+    nginx -g "daemon off;" || true
+    log "nginx exited, restarting in 2s"
+    sleep 2
   done
-  [ "$found" = 1 ] || log "  (none — waiting for the printer)"
-else
-  # BLE through BlueZ over D-Bus (host_dbus) — shares the adapter with Home
-  # Assistant's Bluetooth integration. noble picks its dbus binding from env.
-  export NOBLE_BINDINGS=dbus
-  export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
-  log "Transport: Bluetooth LE via BlueZ (D-Bus), printer: ${ADDRESS:-auto-discover by name}"
-  if [ ! -S /run/dbus/system_bus_socket ]; then
-    log "WARNING: host D-Bus socket missing — Bluetooth cannot work (host_dbus not granted?)"
-  fi
-fi
-
-# ---- generate designer config (read by injected button) ----------------
-cat > /opt/niimblue/config.js <<EOF
-// Generated at runtime from add-on options.
-window.NIIMBLUE_HOST = {
-  model: "${MODEL}",
-  printDirection: "${DIR}",
-  labelWidth: ${LW:-0},
-  labelHeight: ${LH:-0},
-  density: ${DENSITY},
-  threshold: ${THRESHOLD},
-  imageFit: "${FIT}",
-  transport: "${TRANSPORT}",
-  // API is proxied by nginx under the ingress path at ./api/
-  apiBase: "api"
-};
-EOF
-
-# ---- nginx (ingress) in background -------------------------------------
-log "Starting nginx (ingress) on :8099 ..."
-nginx -g "daemon off;" &
-
-# ---- MQTT discovery (polls the server until it is up) ------------------
-export TRANSPORT ADDRESS RECONNECT MODEL IDLE_DISCONNECT LOG_LEVEL
-if [ "$MQTT_ENABLED" = "true" ]; then
-  /usr/local/bin/mqtt-discovery.sh &
-fi
+) &
 
 # ---- print server, supervised in the FOREGROUND ------------------------
 # This loop IS the main run.sh process (PID 1, init: false), so it keeps the
 # server alive: a serial write EIO can still kill the node process despite the
-# lib patch — restart it so /api stays up and returns JSON errors instead of
-# nginx 502s. On add-on stop, forward TERM so the server releases the printer
-# (drops the Bluetooth link) before the container goes away.
-# Bind 0.0.0.0 so HA core rest_command can also reach it on :5000.
+# lib patch, and the BLE watchdog exits on purpose — restart it so /api stays
+# up (queued print jobs survive in /data/queue). On add-on stop, forward TERM
+# so the server releases the printer before the container goes away.
+# Bind 0.0.0.0: port 5000 is only reachable from other containers (HA core
+# via the add-on hostname) unless mapped in the add-on's Network settings.
 export HOST=0.0.0.0 PORT=5000
-# Size/fit defaults + label auto-size (label_width/height 0/0 = detected roll).
+export TRANSPORT ADDRESS MODEL RECONNECT IDLE_DISCONNECT DISCONNECT_AFTER_PRINT LOG_LEVEL
 export LABEL_WIDTH="${LW:-0}" LABEL_HEIGHT="${LH:-0}" IMAGE_FIT="$FIT" PRINT_DIRECTION="$DIR"
-export LABEL_LOOKUP LABELS_FILE=/data/labels.json
+export DENSITY THRESHOLD WAIT_TIMEOUT QUEUE_MAX_AGE_HOURS MQTT_ENABLED
+export LABEL_LOOKUP LABELS_FILE=/data/labels.json DATA_DIR=/data
+export LOW_LABEL_THRESHOLD NOTIFICATIONS DATE_FORMAT TIME_FORMAT TIMEZONE HISTORY_SIZE API_TOKEN
 if [ "$LABEL_LOOKUP" = "true" ]; then
   log "Label size lookup: on (sends only the roll's RFID barcode to NIIMBOT's cloud, once per roll type)"
 else
   log "Label size lookup: off (cached sizes in /data/labels.json still used)"
 fi
+[ -n "$API_TOKEN" ] && log "API token set: clients other than the sidebar must send 'Authorization: Bearer <api_token>'"
 log "Starting niimblue print server on :5000 ..."
 child=""
 stopping=0

@@ -1,8 +1,0 @@
-# Base images per arch. Home Assistant Alpine bases (apk).
-build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base:latest
-  amd64: ghcr.io/home-assistant/amd64-base:latest
-  armv7: ghcr.io/home-assistant/armv7-base:latest
-labels:
-  org.opencontainers.image.title: "NiimBlue Print (BLE)"
-  org.opencontainers.image.source: "https://github.com/Jlang01/ha-niimblue-addons"

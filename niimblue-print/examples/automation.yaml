@@ -1,37 +1,82 @@
-# Example: print a label when a package arrives / a button is pressed.
-- alias: "Print shipping label on demand"
+# Examples. Entity ids: adjust to yours (device "NiimBlue Printer").
+
+# 1) Text label from a button press (rest_command from rest_commands.yaml).
+- alias: "Label: leftovers with today's date"
   triggers:
     - trigger: state
-      entity_id: input_button.print_label
+      entity_id: input_button.print_leftovers_label
   actions:
-    - action: rest_command.niimblue_print_url
+    - action: rest_command.niimblue_print_text
       data:
-        image_url: "https://your-host/labels/next.png"
+        lines:
+          - "Reste"
+          - "{{ now().strftime('%d.%m.%Y') }}"
         copies: 1
 
-# Example: warn when the label roll runs low (MQTT "Labels remaining" sensor,
-# from the roll's RFID tag; updates after each print).
-- alias: "NiimBlue labels running low"
+# 2) Same thing WITHOUT a rest_command: publish to MQTT. The add-on fills in
+#    {{date}} itself (date_format option); here the Jinja is escaped with
+#    {% raw %} so HA does not render it first.
+- alias: "Label: freezer bag via MQTT"
   triggers:
-    - trigger: numeric_state
-      entity_id: sensor.niimblue_printer_labels_remaining   # adjust to your entity id
-      below: 20
+    - trigger: state
+      entity_id: input_button.print_freezer_label
+  actions:
+    - action: mqtt.publish
+      data:
+        topic: niimblue/print
+        payload: >-
+          {% raw %}{"lines": ["Eingefroren", "{{date}}", "MHD {{date+90}}"], "bold": true}{% endraw %}
+
+# 3) Saved text template "Vorrat" (lines "{{name}}", "#{{counter:3}}") via MQTT,
+#    the name taken from an input_text helper.
+- alias: "Label: pantry jar"
+  triggers:
+    - trigger: state
+      entity_id: input_button.print_jar_label
+  actions:
+    - action: mqtt.publish
+      data:
+        topic: niimblue/print/template
+        payload: >-
+          {{ {"name": "Vorrat", "vars": {"name": states('input_text.jar_content')}, "quantity": 1} | tojson }}
+
+# 4) Plain text payload: each "\n" is a new line, auto size.
+- alias: "Label: parcel arrived"
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.parcel_box
+      to: "on"
+  actions:
+    - action: mqtt.publish
+      data:
+        topic: niimblue/print
+        payload: "Paket\\n{{ now().strftime('%d.%m. %H:%M') }}"
+
+# 5) React to failed / expired print jobs (published on niimblue/print/result).
+- alias: "Label printer: job failed"
+  triggers:
+    - trigger: mqtt
+      topic: niimblue/print/result
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.payload_json.ok == false }}"
   actions:
     - action: persistent_notification.create
       data:
         title: "Label printer"
-        message: >-
-          Only {{ states('sensor.niimblue_printer_labels_remaining') }} labels
-          left on the {{ states('sensor.niimblue_printer_label') }} roll.
+        message: "{{ trigger.payload_json.action }}: {{ trigger.payload_json.error }}"
 
-# Example: reconnect nudge (optional; the add-on already retries by itself)
-- alias: "NiimBlue keep-alive reconnect"
+# Low labels / low battery: the add-on already creates one notification per
+# condition (option notifications). For your own reaction use the
+# "Labels low" binary sensor:
+- alias: "Label printer: order labels"
   triggers:
-    - trigger: time_pattern
-      hours: "/6"
-  conditions:
-    - condition: state
-      entity_id: binary_sensor.niimblue_printer_connected   # adjust to your entity id
-      state: "off"
+    - trigger: state
+      entity_id: binary_sensor.niimblue_printer_labels_low
+      to: "on"
   actions:
-    - action: rest_command.niimblue_reconnect
+    - action: todo.add_item
+      target:
+        entity_id: todo.shopping_list
+      data:
+        item: "NIIMBOT labels ({{ states('sensor.niimblue_printer_label') }})"

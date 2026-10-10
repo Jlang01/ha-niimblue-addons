@@ -16,27 +16,23 @@ Then the add-ons below appear in the store.
 
 ### [NiimBlue Print](./niimblue-print)
 
-NIIMBOT label **designer** (NiimBlue) in the HA sidebar + a **persistent
-host-side print server** over **USB-serial or Bluetooth LE**. Design a label,
-hit **Print via host**, it prints from the HA machine. Automations can print
-via a REST call.
+NIIMBOT label printing from Home Assistant, over **USB or Bluetooth LE**
+(through HA's own adapter via BlueZ/D-Bus — coexists with HA's Bluetooth
+integration, no pairing, no dongle).
 
-- `transport: serial` (USB) or `transport: ble` — Bluetooth LE through HA's
-  own adapter via BlueZ/D-Bus, **coexists with HA's Bluetooth integration**,
-  no pairing, no dongle
-- Starts without the printer, reconnects by itself, status entity via MQTT
-- Detects the label roll (RFID) and fits prints to its size; label name and
-  labels-remaining sensors
-- Ingress UI (authenticated), MQTT auto-discovery, NIIMBOT USB auto-detection
-- Tested target: **NIIMBOT B21S** (USB `3513:0002` → `/dev/ttyACM0`; BLE
-  `B21S-…`)
+- Sidebar page: NiimBlue **designer**, **Quick print** text labels with live
+  preview, **templates** (`{{placeholders}}`, dates, counters), **history**
+  with reprint, **diagnostics** — also on phones
+- **Persistent print queue**: prints wait while the printer is off or out of
+  range and come out as soon as it's back; lid open / no labels pause it
+- Text, QR codes and barcodes rendered on the server, sized to the label roll
+  the printer reports (RFID)
+- Automations: REST (`rest_command`) or MQTT topics; MQTT auto-discovery with
+  status, battery, label roll, labels remaining, queue, quick-print entities
+- Warnings when labels or battery run low (HA notifications)
+- Tested target: **NIIMBOT B21S** (USB `3513:0002`; BLE `B21S-…`)
 
 See its [DOCS](./niimblue-print/DOCS.md).
-
-### [NiimBlue Print (Bluetooth)](./niimblue-print-bt) — deprecated
-
-Old Bluetooth Classic (niimprint) variant. Superseded by **NiimBlue Print**
-with `transport: ble`; niimprint prints blank labels on the B21S. Uninstall it.
 
 ## Credits
 
