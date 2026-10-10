@@ -3,6 +3,15 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.1.1
+- **MQTT entities actually appear.** The Supervisor token is now also read from
+  s6's container environment, the broker lookup retries for a minute at boot,
+  and a failure logs the real HTTP status instead of a generic "not available".
+- **Clear Bluetooth error when the host has no adapter.** Instead of noble's
+  "Timeout waiting for Noble to be powered on", the status says there is no
+  local Bluetooth adapter (ESPHome Bluetooth proxies can't be used from an
+  add-on) and suggests passing a USB adapter to the host or using serial.
+
 ## 1.1.0
 - **Starts without the printer.** `address` is now a plain text option instead
   of a device picker: Supervisor refused to start the add-on (and raised a

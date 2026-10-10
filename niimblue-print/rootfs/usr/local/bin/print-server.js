@@ -265,8 +265,16 @@ async function connectNow(reason) {
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }
-      failed(e);
-      throw new RestError(`connect failed: ${msg(e)}`, 503);
+      // noble never reaching "poweredOn" = BlueZ has no usable local adapter
+      // (e.g. HA in a VM that only uses ESPHome Bluetooth proxies, which an
+      // add-on cannot reach). Say so instead of the cryptic noble message.
+      const err = /powered on/i.test(msg(e))
+        ? new Error("no local Bluetooth adapter on the host (BlueZ never powered on). " +
+          "ESPHome Bluetooth proxies are not usable from an add-on; pass a USB BT " +
+          "adapter to the host or use transport: serial")
+        : e;
+      failed(err);
+      throw new RestError(`connect failed: ${msg(err)}`, 503);
     }
   }
   state.address = address;

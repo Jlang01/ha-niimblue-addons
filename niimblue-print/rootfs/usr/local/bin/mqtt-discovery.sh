@@ -7,12 +7,31 @@ API=http://127.0.0.1:5000
 log() { echo "[niimblue:mqtt] $*"; }
 
 # --- broker credentials from Supervisor ---------------------------------
-SVC=$(curl -sf -H "Authorization: Bearer ${SUPERVISOR_TOKEN:-}" \
-      http://supervisor/services/mqtt 2>/dev/null || true)
+# Under s6-overlay the token may only exist in s6's container environment, not
+# in this process' env: fall back to it. Retry a while (Supervisor/Mosquitto
+# can still be coming up at boot) and log the real HTTP status on failure.
+TOKEN="${SUPERVISOR_TOKEN:-}"
+[ -z "$TOKEN" ] && [ -r /run/s6/container_environment/SUPERVISOR_TOKEN ] \
+  && TOKEN=$(cat /run/s6/container_environment/SUPERVISOR_TOKEN)
+[ -z "$TOKEN" ] && log "WARNING: no SUPERVISOR_TOKEN available"
+SVC=""
+for attempt in 1 2 3 4 5 6; do
+  body=$(curl -s -m 10 -w '\n%{http_code}' -H "Authorization: Bearer ${TOKEN}" \
+         http://supervisor/services/mqtt 2>&1 || true)
+  code=${body##*$'\n'}
+  body=${body%$'\n'*}
+  if [ "$code" = "200" ] && echo "$body" | jq -e '.data.host' >/dev/null 2>&1; then
+    SVC=$body
+    break
+  fi
+  log "MQTT service lookup failed (attempt $attempt, HTTP ${code:-none}): $(echo "$body" | head -c 200)"
+  sleep 10
+done
 if [ -z "$SVC" ]; then
   log "MQTT service not available (is the Mosquitto add-on running?). Skipping."
   exit 0
 fi
+log "MQTT broker: $(echo "$SVC" | jq -r '.data.host'):$(echo "$SVC" | jq -r '.data.port')"
 MQ_HOST=$(echo "$SVC" | jq -r '.data.host')
 MQ_PORT=$(echo "$SVC" | jq -r '.data.port')
 MQ_USER=$(echo "$SVC" | jq -r '.data.username')
