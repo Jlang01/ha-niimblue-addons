@@ -7,12 +7,15 @@
 # NOTE: this is Bluetooth *Classic* (RFCOMM/SPP), NOT BLE — that is what the
 # niimprint backend speaks. The printer must support Classic SPP and be paired.
 name: NiimBlue Print (Bluetooth)
-version: "0.2.1"
+version: "0.2.2"
 slug: niimblue_print_bt
+# DEPRECATED: superseded by "NiimBlue Print" with `transport: ble` (BLE via
+# BlueZ D-Bus + niimbluelib). niimprint's protocol prints BLANK labels on the
+# B21S (niimprint issue #33), so this add-on cannot print on that printer.
+stage: deprecated
 description: >-
-  NIIMBOT label designer (NiimBlue) + host-side Bluetooth print server. Prints
-  over Home Assistant's internal Bluetooth adapter via a Classic RFCOMM socket
-  (coexists with HA Bluetooth). No USB passthrough or Bluetooth dongle required.
+  DEPRECATED — use "NiimBlue Print" with transport: ble instead. Old
+  experimental Bluetooth Classic (RFCOMM, niimprint) variant.
 url: "https://github.com/Jlang01/ha-niimblue-addons"
 arch:
   - aarch64

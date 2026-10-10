@@ -27,16 +27,28 @@ ENV LANG=C.UTF-8 NODE_ENV=production
 #  nginx jq curl bash mosquitto-clients : runtime glue
 #  nodejs npm                           : run niimblue-node
 #  build-base python3 pkgconf linux-headers eudev-dev : native module build
-#  bluez-dev                            : only needed if BLE fallback is used
+#  bluez-dev                            : noble's (unused) raw-HCI addon build
 RUN apk add --no-cache \
       nginx jq curl bash mosquitto-clients \
       nodejs npm \
       build-base python3 pkgconf linux-headers eudev-dev bluez-dev
 
-# --- niimblue-node (CLI + REST print server) ---
-ARG NIIMBLUE_NODE_VERSION=latest
-RUN npm install -g @mmote/niimblue-node@${NIIMBLUE_NODE_VERSION} \
-    && npm cache clean --force
+# --- niimblue-node (niimbluelib + encoder; our print-server.js wraps it) ---
+# Pinned: print-server.js uses its exported printImages/ImageEncoder/loaders
+# and patch-niimbluelib.sh patches its niimbluelib build.
+ARG NIIMBLUE_NODE_VERSION=1.4.1
+# dbus-next: lets noble (niimbluelib's BLE lib) use its BlueZ D-Bus binding
+# (NOBLE_BINDINGS=dbus) instead of raw HCI, so BLE printing shares the adapter
+# with Home Assistant's Bluetooth integration. Global install = resolvable
+# from noble's nested node_modules (/usr/local/lib/node_modules).
+ARG DBUS_NEXT_VERSION=0.10.2
+RUN npm install -g @mmote/niimblue-node@${NIIMBLUE_NODE_VERSION} dbus-next@${DBUS_NEXT_VERSION} \
+    && npm cache clean --force \
+    && cd /usr/local/lib/node_modules/@mmote/niimblue-node \
+    && NOBLE=$(dirname "$(node -p 'require.resolve("@stoprocent/noble/package.json", {paths:[require.resolve("@mmote/niimbluelib")]})')") \
+    && test -f "$NOBLE/lib/dbus/bindings.js" \
+    && node -e 'require.resolve("dbus-next", {paths:[process.argv[1] + "/lib/dbus"]})' "$NOBLE" \
+    && echo "[build] noble dbus binding OK ($NOBLE)"
 
 # --- designer static build from stage 1 ---
 COPY --from=designer /src/dist /opt/niimblue

@@ -17,27 +17,24 @@ Then the add-ons below appear in the store.
 ### [NiimBlue Print](./niimblue-print)
 
 NIIMBOT label **designer** (NiimBlue) in the HA sidebar + a **persistent
-host-side print server** over USB-serial. Design a label, hit **Print via
-host**, it prints from the HA machine. Automations can print via a REST call.
+host-side print server** over **USB-serial or Bluetooth LE**. Design a label,
+hit **Print via host**, it prints from the HA machine. Automations can print
+via a REST call.
 
-- Serial-only by default → no Bluetooth concurrency issues
-- Ingress UI (authenticated), MQTT auto-discovery, serial auto-detection
-- Tested target: **NIIMBOT B21** (USB `3513:0002` → `/dev/ttyACM0`)
+- `transport: serial` (USB) or `transport: ble` — Bluetooth LE through HA's
+  own adapter via BlueZ/D-Bus, **coexists with HA's Bluetooth integration**,
+  no pairing, no dongle
+- Starts without the printer, reconnects by itself, status entity via MQTT
+- Ingress UI (authenticated), MQTT auto-discovery, NIIMBOT USB auto-detection
+- Tested target: **NIIMBOT B21S** (USB `3513:0002` → `/dev/ttyACM0`; BLE
+  `B21S-…`)
 
 See its [DOCS](./niimblue-print/DOCS.md).
 
-### [NiimBlue Print (Bluetooth)](./niimblue-print-bt) — experimental
+### [NiimBlue Print (Bluetooth)](./niimblue-print-bt) — deprecated
 
-Same designer, but prints over the **host's internal Bluetooth** adapter via a
-Bluetooth Classic RFCOMM (SPP) socket ([niimprint](https://github.com/AndBondStyle/niimprint)).
-Kernel/BlueZ-arbitrated, so it **coexists with Home Assistant's Bluetooth
-integration** — no USB dongle, no USB passthrough, no exclusive adapter grab.
-
-- Classic SPP (not BLE); printer must be **paired** and its MAC set
-- For when you can't pass the USB device through
-- Not yet verified against hardware — **prefer the serial add-on** where possible
-
-See its [DOCS](./niimblue-print-bt/DOCS.md).
+Old Bluetooth Classic (niimprint) variant. Superseded by **NiimBlue Print**
+with `transport: ble`; niimprint prints blank labels on the B21S. Uninstall it.
 
 ## Credits
 

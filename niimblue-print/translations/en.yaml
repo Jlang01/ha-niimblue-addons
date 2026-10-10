@@ -1,15 +1,24 @@
 configuration:
   transport:
     name: Transport
-    description: How to reach the printer. serial (USB, recommended) or ble.
-  address:
-    name: Printer device
     description: >-
-      Serial device (dropdown) or BLE MAC. Leave empty to auto-detect the serial
-      port. For a B21 over USB this is /dev/ttyACM0.
+      serial = USB cable (recommended when the printer is plugged into the HA
+      host). ble = Bluetooth LE through Home Assistant's own Bluetooth adapter
+      (shared with HA's Bluetooth integration, no pairing needed).
+  address:
+    name: Printer address
+    description: >-
+      serial: device path, best a stable /dev/serial/by-id/... path. ble:
+      printer MAC (e.g. C3:F9:26:03:17:20) or Bluetooth name (e.g.
+      B21S-C2BF926031720). Leave empty to auto-detect (serial: NIIMBOT USB
+      device; ble: scan by name). The add-on also starts when the printer is
+      off and connects once it shows up.
   model:
     name: Printer model (printTask)
-    description: Leave empty to auto-detect on connect. Recommended for B21.
+    description: >-
+      Print task name (B1, D110, ...). Empty = auto-detect on connect. Over
+      Bluetooth auto-detect works (B21S -> D110). B1 is known to print on the
+      B21S over USB.
   label_width:
     name: Label width (px)
     description: 0 = use the designed image's own width. B21 printhead max = 384.
@@ -30,10 +39,19 @@ configuration:
     description: How the image is resized to the label (sharp fit modes).
   reconnect_seconds:
     name: Reconnect interval (s)
-    description: How often to re-check the connection and republish status.
+    description: >-
+      Base retry interval while the printer is unreachable (backs off up to 5
+      min) and MQTT status publish interval.
+  idle_disconnect_seconds:
+    name: Bluetooth idle disconnect (s)
+    description: >-
+      ble only. Release the Bluetooth link after this many idle seconds; the
+      next print reconnects automatically (a few seconds). 0 = keep the
+      printer connected permanently (holds an HA Bluetooth connection slot and
+      keeps the printer awake).
   mqtt_enabled:
     name: Enable MQTT discovery
-    description: Publish connected/battery/reconnect entities to Home Assistant.
+    description: Publish connected/status/battery/reconnect entities to Home Assistant.
   log_level:
     name: Log level
     description: trace, debug, info, warning or error.

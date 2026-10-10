@@ -3,7 +3,7 @@
  * NiimBlue's built-in print uses Web Bluetooth / Web Serial from the BROWSER,
  * which cannot reach a printer plugged into the Home Assistant host. This adds
  * a button that exports the current label canvas and POSTs it to the add-on's
- * niimblue-node print server, which owns the host's serial connection.
+ * print server, which owns the printer connection (USB serial or Bluetooth).
  *
  * The canvas selector is version-sensitive (NiimBlue uses fabric.js). If export
  * grabs the wrong element, adjust CANVAS_SELECTORS below.
@@ -98,13 +98,35 @@
         if (res.ok) {
           toast("Sent to printer ✓", true);
         } else if (res.status === 502 || res.status === 504) {
-          toast("Print server is down (it may have crashed on a serial error). Check the add-on log.", false);
+          toast("Print server is down (restarting?). Check the add-on log.", false);
         } else {
           toast("Print error (" + res.status + "): " + msg, false);
         }
       })
       .catch(function (e) { toast("Request failed: " + e, false); })
-      .finally(function () { btn.disabled = false; btn.textContent = "🖨 Print via host"; });
+      .finally(function () { btn.disabled = false; btn.textContent = "🖨 Print via host"; refreshStatus(); });
+  }
+
+  // --- printer state dot (GET api/status) ---
+  // green = connected, blue = idle (Bluetooth connects on demand),
+  // amber = connecting / waiting for the printer, red = error / server down.
+  var COLORS = { connected: "#43a047", idle: "#29b6f6", connecting: "#ffb300",
+                 waiting: "#ffb300", starting: "#ffb300", disconnected: "#ffb300" };
+  var dot = document.createElement("span");
+  dot.style.cssText = "width:10px;height:10px;border-radius:50%;display:inline-block;" +
+    "margin:0 4px;background:#78909c;";
+  dot.title = "Printer status: unknown";
+
+  function refreshStatus() {
+    fetch(API + "/status", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        dot.style.background = COLORS[s.status] || "#e53935";
+        dot.title = "Printer (" + (s.transport || "?") + "): " + s.status +
+          (s.detail ? " — " + s.detail : "") +
+          (s.battery != null ? " | battery " + s.battery + "%" : "");
+      })
+      .catch(function () { dot.style.background = "#e53935"; dot.title = "Print server unreachable"; });
   }
 
   // --- UI: floating button + quantity ---
@@ -126,11 +148,13 @@
     "cursor:pointer;border:none;border-radius:6px;padding:8px 12px;" +
     "background:#00b8d4;color:#001318;font-weight:600;";
 
-  bar.appendChild(qty); bar.appendChild(btn);
+  bar.appendChild(dot); bar.appendChild(qty); bar.appendChild(btn);
 
   function mount() {
     if (document.body) document.body.appendChild(bar);
     else setTimeout(mount, 300);
   }
   mount();
+  refreshStatus();
+  setInterval(refreshStatus, 10000);
 })();

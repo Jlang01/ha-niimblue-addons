@@ -3,6 +3,30 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.1.0
+- **Starts without the printer.** `address` is now a plain text option instead
+  of a device picker: Supervisor refused to start the add-on (and raised a
+  "boot failed" repair) whenever the printer was off or unplugged at boot.
+  Hot-plug works: switch the printer on any time and it connects by itself.
+- New print server wrapper (same niimblue-node/niimbluelib print path):
+  retries with backoff (no more `connect -> unreachable` log spam, real error
+  messages instead), connects on demand when a print arrives, one print job at
+  a time, a watchdog for stuck jobs, clean printer release on add-on stop.
+- Serial auto-detect (`address` empty) only picks a NIIMBOT USB device
+  (vendor 3513), never another serial stick.
+- **Bluetooth LE transport** (`transport: ble`): prints through Home
+  Assistant's own Bluetooth adapter via BlueZ/D-Bus, so it coexists with HA's
+  Bluetooth integration. `address` = printer MAC or name, or empty to find it
+  by name. The link is released after `idle_disconnect_seconds` (default 60).
+  Verified printing on a B21S over BLE. Replaces the experimental
+  "NiimBlue Print (Bluetooth)" add-on.
+- New `GET /status` (state, detail, battery, last error, last print) and
+  `POST /reconnect`. MQTT: new **Status** sensor (details as attributes),
+  battery now actually reported (wrong field before), entities go
+  *unavailable* when the add-on stops (MQTT Last Will).
+- Designer print bar shows a printer status dot.
+- niimblue-node pinned to 1.4.1.
+
 ## 1.0.5
 - Dropped the "browser does not support bluetooth/serial" banner.
 - Preview's **Print** button now prints via the host server (padded to a

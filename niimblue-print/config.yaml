@@ -1,12 +1,12 @@
 # Home Assistant add-on manifest
 # Local add-on: NiimBlue Print Server
 name: NiimBlue Print
-version: "1.0.5"
+version: "1.1.0"
 slug: niimblue_print
 description: >-
   NIIMBOT label designer (NiimBlue) + persistent host-side print server.
-  Designs labels in the HA sidebar and prints over the host's USB-serial
-  connection. Serial-only by default to avoid Bluetooth concurrency.
+  Designs labels in the HA sidebar and prints over USB-serial or Bluetooth LE
+  (through Home Assistant's own Bluetooth adapter, shared via BlueZ).
 url: "https://github.com/MultiMote/niimblue-node"
 arch:
   - aarch64
@@ -28,17 +28,23 @@ ports_description:
   5000/tcp: NiimBlue REST print API (for rest_command / automations)
 
 # --- Hardware access ---
-# uart -> maps /dev/ttyUSB* and /dev/ttyACM* (Niimbot USB-CDC serial).
+# uart -> cgroup access to ALL ttyACM*/ttyUSB* (by major number) + /dev
+#         propagation, so a printer switched on AFTER the add-on started is
+#         usable without a restart (hot-plug). That is also why `address` is a
+#         plain string, not a `device` option: Supervisor refuses to START an
+#         add-on whose `device` option points at a node that is absent
+#         (printer off / unplugged at boot).
 uart: true
 usb: true
 udev: true
-# If you later want BLE fallback, flip this true and set transport: ble.
-host_dbus: false
+# transport: ble talks to the host's BlueZ over D-Bus (no raw HCI, no
+# NET_ADMIN), so it shares the adapter with HA's Bluetooth integration.
+host_dbus: true
 
 # --- User options ---
 options:
   transport: serial
-  address: ""            # empty = auto-detect serial device (B21 = /dev/ttyACM0)
+  address: ""            # serial: /dev/serial/by-id/... ; ble: MAC or BLE name; "" = auto
   model: "B1"            # printTask. B21/B21_C2B use the B1 task (384px head). Info
                          # auto-detect times out over serial on B21S, so hard-set it.
   label_width: 0         # px; 0 = use the designer image's own size. B21 printhead max = 384
@@ -48,11 +54,12 @@ options:
   threshold: 128
   image_fit: contain
   reconnect_seconds: 10
+  idle_disconnect_seconds: 60   # ble only: release the link after N idle s; 0 = stay connected
   mqtt_enabled: true
   log_level: info
 schema:
   transport: list(serial|ble)
-  address: device(subsystem=tty)?   # UI dropdown of tty serial devices; empty = auto-detect
+  address: str?          # NOT device(): that blocks add-on start when the printer is off
   model: str?
   label_width: int(0,)
   label_height: int(0,)
@@ -61,6 +68,7 @@ schema:
   threshold: int(1,255)
   image_fit: list(contain|cover|fill|inside|outside)
   reconnect_seconds: int(3,)
+  idle_disconnect_seconds: int(0,)
   mqtt_enabled: bool
   log_level: list(trace|debug|info|warning|error)
 

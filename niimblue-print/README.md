@@ -1,36 +1,39 @@
 # NiimBlue Print (Home Assistant add-on)
 
 NIIMBOT label **designer in the HA sidebar** + a **persistent host-side print
-server** over USB-serial. Design a label, press **Print via host**, it prints
-from the Home Assistant machine. Automations can print too via a REST call.
+server** over **USB-serial or Bluetooth LE**. Design a label, press **Print via
+host**, it prints from the Home Assistant machine. Automations can print too
+via a REST call.
 
-- Serial-only by default → no Bluetooth concurrency headaches.
+- USB-serial or Bluetooth LE (`transport` option). Bluetooth goes through
+  BlueZ over D-Bus, so it shares the adapter with HA's Bluetooth integration.
+- Starts without the printer; hot-plug / reconnect with backoff.
 - Ingress UI (authenticated, no extra cert).
-- MQTT auto-discovery: connected sensor, battery, reconnect button.
-- Serial device auto-detection.
+- MQTT auto-discovery: connected, status, battery, reconnect button.
 
-## Install (local add-on)
+## Install
 
-1. Copy the `niimblue-print/` folder into your HA `addons/` share
-   (Samba/SSH add-on → `/addons/niimblue-print`).
-2. **Settings → Add-ons → Add-on Store → ⋮ → Check for updates**.
-3. Open **NiimBlue Print**, install, start.
-4. Plug the printer into the HA host via USB.
+1. Settings → Add-ons → Add-on Store → ⋮ → **Repositories** → add
+   `https://github.com/Jlang01/ha-niimblue-addons`.
+2. Open **NiimBlue Print**, install, choose `transport`, start.
 
-See [DOCS.md](DOCS.md) for options, automations, and troubleshooting.
+See [DOCS.md](DOCS.md) for options, Bluetooth setup, automations, and
+troubleshooting.
 
 ## Architecture
 
 ```
-┌ Add-on container ─────────────────────────────┐
-│ nginx (:8099, Ingress) ── serves NiimBlue      │
-│   └ /api/  ─proxy→  niimblue-node server (:5000)│
-│                       └ owns /dev/ttyXXX (serial)│
-└────────────────────────────────────────────────┘
+┌ Add-on container ───────────────────────────────────────┐
+│ nginx (:8099, Ingress) ── serves NiimBlue designer       │
+│   └ /api/  ─proxy→  print-server.js (:5000)              │
+│                       ├ serial: /dev/ttyACM* (uart)      │
+│                       └ ble:    BlueZ via host D-Bus     │
+└──────────────────────────────────────────────────────────┘
    designer "Print via host"  ┐
    HA rest_command  ──────────┴→ POST /print → printer
 ```
 
-Built on [NiimBlue](https://github.com/MultiMote/niimblue) and
-[niimblue-node](https://github.com/MultiMote/niimblue-node) by MultiMote.
-Not affiliated with NIIMBOT.
+`print-server.js` wraps [niimblue-node](https://github.com/MultiMote/niimblue-node)
+/ [niimbluelib](https://github.com/MultiMote/niimbluelib) by MultiMote (same
+encoder and print flow as `niimblue-cli server`) and adds connection
+management. Not affiliated with NIIMBOT.

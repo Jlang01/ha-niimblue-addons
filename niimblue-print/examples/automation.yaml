@@ -7,19 +7,16 @@
     - action: rest_command.niimblue_print_url
       data:
         image_url: "https://your-host/labels/next.png"
-        model: "B1"
         copies: 1
 
-# Example: nightly reconnect nudge (optional; autoconnect already handles drops)
+# Example: reconnect nudge (optional; the add-on already retries by itself)
 - alias: "NiimBlue keep-alive reconnect"
   triggers:
     - trigger: time_pattern
       hours: "/6"
   conditions:
     - condition: state
-      entity_id: binary_sensor.niimblue_connected
+      entity_id: binary_sensor.niimblue_printer_connected   # adjust to your entity id
       state: "off"
   actions:
     - action: rest_command.niimblue_reconnect
-      data:
-        address: "/dev/serial/by-id/usb-NIIMBOT..."

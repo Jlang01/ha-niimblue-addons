@@ -1,4 +1,10 @@
-# NiimBlue Print (Bluetooth) — experimental
+# NiimBlue Print (Bluetooth) — DEPRECATED
+
+> **Deprecated.** Use the **NiimBlue Print** add-on with `transport: ble`
+> instead. It prints over Bluetooth LE through Home Assistant's own adapter
+> (BlueZ via D-Bus, coexists with HA Bluetooth) using the same protocol library
+> as USB, and is verified on a B21S. This add-on's niimprint backend prints
+> blank labels on the B21S. Kept only so existing installs see this notice.
 
 Same NiimBlue label designer in the Home Assistant sidebar as the serial
 add-on, but printing goes over the **host's internal Bluetooth adapter**.

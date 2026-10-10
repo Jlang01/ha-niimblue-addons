@@ -3,6 +3,14 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 0.2.2
+- **Deprecated.** Use **NiimBlue Print** (1.1.0+) with `transport: ble`
+  instead: Bluetooth LE through Home Assistant's own adapter via BlueZ/D-Bus,
+  same protocol library as USB, verified printing on a B21S. This add-on's
+  backend (niimprint, Bluetooth Classic) uses an outdated protocol that prints
+  blank labels on the B21S, and the B21S advertises its BLE address as
+  LE-only. Uninstall this add-on after switching.
+
 ## 0.2.1
 - Print is fully connect-on-demand: each print opens the Bluetooth link to the
   paired printer, prints, then **explicitly disconnects** (no per-print scan, no
