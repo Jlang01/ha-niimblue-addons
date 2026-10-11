@@ -111,6 +111,27 @@ test("queue: survives a restart; only a job whose page had started becomes faile
   assert.equal(q2.pages(q2.get(a.id))[0].buf.length, PNG.length);
 });
 
+test("queue: a job the server keeps crashing on while connecting fails after 3 restarts", () => {
+  const dir = tmpDir("q3c");
+  const q = mk(dir);
+  const j = q.add({ summary: "crashy" }, page());
+  q.get(j.id).state = "printing";
+  q.save();
+  let qn = q;
+  for (let i = 1; i <= 2; i++) {
+    qn = mk(dir);
+    assert.equal(qn.get(j.id).state, "queued");
+    assert.equal(qn.get(j.id).crashes, i);
+    qn.get(j.id).state = "printing";
+    qn.save();
+  }
+  qn = mk(dir);
+  assert.equal(qn.get(j.id).state, "failed");
+  assert.equal(qn.get(j.id).error_state, "crashed");
+  qn.retry(j.id);
+  assert.equal(qn.get(j.id).crashes, 0);
+});
+
 test("queue: expiry, cancel, clear, corrupt index quarantined", async () => {
   const dir = tmpDir("q4");
   const ended = [];

@@ -3,6 +3,15 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.3.1
+- **Fix: Bluetooth printing crashed the print server** on 1.3.0 ("TypeError:
+  util.isError is not a function"). The new Alpine 3.24 base ships Node 24,
+  which removed `util.isError`; dbus-next's socket library still calls it on
+  the first write to BlueZ. Polyfilled before the BLE stack loads.
+- A queued job no longer causes an endless restart loop when the server dies
+  while connecting for it: after 3 such crashes it is marked failed
+  ("crashed") for a manual retry.
+
 ## 1.3.0
 **Heads-up:** port 5000 is no longer published on the host by default (see
 *Security*). HA automations reach the API via the add-on's internal hostname

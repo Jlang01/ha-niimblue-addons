@@ -65,6 +65,10 @@ If HA shows an old "Neueste Version" after a push:
   linuxmusl-arm binary.
 - print-server.js imports niimblue-node internals (printImages, ImageEncoder)
   — niimblue-node is pinned; re-test before bumping it.
+- Node 24 (Alpine 3.24) removed `util.isError`; usocket 0.3 (dbus-next's
+  unix socket) still calls it on every BLE connect -> print-server.js
+  polyfills it at the top. The fake-printer e2e never touches dbus, so only a
+  real BLE connect catches this kind of break.
 - niimbluelib BLE quirks handled in print-server.js: c.device is set only at
   the END of connect() (a timed-out connect must be disconnected when it
   settles, else an orphan link holds the printer); every connect adds a

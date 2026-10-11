@@ -31,6 +31,7 @@ const BACKOFF_MIN_MS = 5000;
 const BACKOFF_MAX_MS = 60000;
 const PAUSE_RETRY_MS = 15000;
 const MAX_ATTEMPTS = 3;
+const MAX_CRASHES = 3;      // server deaths while connecting for one job
 const KEEP_FINISHED = 30;   // failed/expired jobs kept for retry / inspection
 
 class PrintQueue {
@@ -68,8 +69,14 @@ class PrintQueue {
     // (it was still connecting) it simply waits again; otherwise we cannot
     // know how far it got -> failed, manual retry (never print a label twice)
     for (const j of this.jobs) {
-      if (j.state === "printing" && !j.page_started) {
-        Object.assign(j, { state: "queued", attempts: Math.max(0, (j.attempts || 1) - 1) });
+      if (j.state === "printing" && !j.page_started && (j.crashes || 0) + 1 >= MAX_CRASHES) {
+        // the server died while connecting for it again and again: stop the
+        // restart -> reconnect -> crash loop, leave it for a manual retry
+        Object.assign(j, { state: "failed", error_state: "crashed", finished_at: new Date().toISOString(),
+          crashes: (j.crashes || 0) + 1,
+          last_error: `the print server crashed ${MAX_CRASHES} times while connecting for this job; see the add-on log, then retry` });
+      } else if (j.state === "printing" && !j.page_started) {
+        Object.assign(j, { state: "queued", attempts: Math.max(0, (j.attempts || 1) - 1), crashes: (j.crashes || 0) + 1 });
       } else if (j.state === "printing") {
         Object.assign(j, { state: "failed", error_state: "interrupted", finished_at: new Date().toISOString(),
           last_error: "the print server restarted while this job was printing; check the printer, then retry" });
@@ -212,7 +219,7 @@ class PrintQueue {
     if (!["failed", "expired"].includes(job.state)) {
       const e = new Error(`job is ${job.state}; only failed or expired jobs can be retried`); e.status = 409; throw e;
     }
-    Object.assign(job, { state: "queued", attempts: 0, error_state: null, finished_at: null, page_started: false,
+    Object.assign(job, { state: "queued", attempts: 0, crashes: 0, error_state: null, finished_at: null, page_started: false,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     // re-dated, so it is not expired at once; keep queue order by moving it to the end
     this.jobs = [...this.jobs.filter((j) => j !== job), job];

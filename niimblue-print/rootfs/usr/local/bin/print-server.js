@@ -39,6 +39,16 @@ const path = require("path");
 const crypto = require("crypto");
 const { createRequire } = require("module");
 
+// usocket 0.3 (dbus-next's unix socket, i.e. every BLE connect) calls
+// util.isError, which Node 23+ removed: without this the first write to
+// BlueZ throws inside a socket callback and kills the server.
+{
+  const util = require("util");
+  if (typeof util.isError !== "function") {
+    util.isError = (e) => e instanceof Error || Object.prototype.toString.call(e) === "[object Error]";
+  }
+}
+
 // Bluetooth always via BlueZ over D-Bus (shared with HA), never noble's raw
 // HCI binding: set before niimbluelib loads noble (transport auto and /scan
 // can use Bluetooth even when the add-on option says serial).
