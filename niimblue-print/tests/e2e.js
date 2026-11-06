@@ -352,7 +352,7 @@ let brokerOn = false;
 
     await check("GET /diag and GET /scan", async () => {
       const d = (await call("GET", "/diag")).json;
-      assert.equal(d.version, "1.3.0");
+      assert.equal(d.version, fs.readFileSync(path.join(__dirname, "../config.yaml"), "utf8").match(/^version:\s*"?([^"\s]+)/m)[1]);
       assert.equal(d.transport.active, "serial");
       assert.ok(d.events.length >= 1);
       assert.ok(d.versions["niimblue-node"]);

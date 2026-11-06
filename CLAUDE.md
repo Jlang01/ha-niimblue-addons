@@ -66,9 +66,22 @@ If HA shows an old "Neueste Version" after a push:
 - print-server.js imports niimblue-node internals (printImages, ImageEncoder)
   — niimblue-node is pinned; re-test before bumping it.
 - Node 24 (Alpine 3.24) removed `util.isError`; usocket 0.3 (dbus-next's
-  unix socket) still calls it on every BLE connect -> print-server.js
-  polyfills it at the top. The fake-printer e2e never touches dbus, so only a
-  real BLE connect catches this kind of break.
+  optional native unix socket) called it on every BLE connect (1.3.0 crash).
+  Since 1.3.2 the Dockerfile deletes `node_modules/usocket` (dbus-next then
+  uses Node's `net`; noble's BlueZ binding never passes fds, so nothing is
+  lost); the polyfill at the top of print-server.js stays as a backstop.
+- The fake-printer e2e never touches D-Bus. The image build runs
+  `usr/local/bin/dbus-smoke.js` against a throwaway private dbus-daemon
+  (no polyfill, strict) — keep it; it fails the build on BLE-stack breaks.
+- Crash handling (1.3.2): `lib/crash.js` fatal handler writes
+  `/data/last-crash.json`; run.sh backs off 2 s -> 5 min on quick crashes
+  (< 60 s run; exit code 3 = BLE watchdog, not counted) and raises ONE HA
+  notification (`niimblue_crash_loop`, flag `/data/crash-loop-notified`)
+  after 5 in a row; the server dismisses it after 10 min uptime.
+  `tests/crash.test.js` drives run.sh with a crashing fake server.
+- Version shows up three places: `config.yaml`, lib `package.json` (+ lock
+  top entries; the log/`/diag` version), CHANGELOG top. A test enforces they
+  match — bump all of them.
 - niimbluelib BLE quirks handled in print-server.js: c.device is set only at
   the END of connect() (a timed-out connect must be disconnected when it
   settles, else an orphan link holds the printer); every connect adds a

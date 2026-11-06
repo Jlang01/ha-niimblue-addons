@@ -59,6 +59,20 @@ process.env.DBUS_SYSTEM_BUS_ADDRESS = process.env.DBUS_SYSTEM_BUS_ADDRESS || "un
 // resolve it and ITS copies of the libs so we share one niimbluelib instance
 // with its printImages()/ImageEncoder.
 const LIB_DIR = process.env.NIIMBLUE_LIB_DIR || path.join(__dirname, "../lib/niimblue-print");
+
+// Installed before anything else loads: an exception nobody catches (e.g.
+// thrown inside a native socket callback) is logged as one clear FATAL line
+// and recorded in /data/last-crash.json for run.sh (crash-loop notification)
+// and the next start (/status, /diag); then the process exits and run.sh
+// restarts it with backoff.
+const crash = require(path.join(LIB_DIR, "crash.js"));
+const VERSION = (() => { try { return require(path.join(LIB_DIR, "package.json")).version; } catch (_) { return "?"; } })();
+crash.installFatalHandler({
+  dataDir: process.env.DATA_DIR || "/data",
+  version: VERSION,
+  log: (m) => console.error(`[niimblue:server] ${m}`),
+});
+
 const NB_DIR = process.env.NIIMBLUE_NODE_DIR || path.join(LIB_DIR, "node_modules/@mmote/niimblue-node");
 const nbRequire = createRequire(path.join(NB_DIR, "package.json"));
 const nb = nbRequire("./");
@@ -125,7 +139,8 @@ if (CFG.printTask && !lib.printTaskNames.includes(CFG.printTask)) {
   CFG.printTask = "";
 }
 const PRINTER_FILE = path.join(CFG.dataDir, "printer.json");   // remembered BLE printer
-const VERSION = (() => { try { return require(path.join(LIB_DIR, "package.json")).version; } catch (_) { return "?"; } })();
+const LAST_CRASH = crash.read(CFG.dataDir);   // the previous run's fatal error, if any
+const CRASH_RECOVERY_MS = 10 * 60 * 1000;     // up this long = a crash loop is over
 
 const NIIMBOT_USB_VID = "3513";
 const BACKOFF_MAX_S = 300;
@@ -1255,6 +1270,7 @@ function statusObj() {
     queue: q ? { length: q.length, failed: q.failed, blocked: q.blocked ? q.blocked.state : null,
       blocked_reason: q.blocked ? q.blocked.message : null, oldest_at: q.oldest_at } : null,
     warnings: warnings ? warnings.status() : null,
+    last_crash: LAST_CRASH,
   };
 }
 
@@ -1551,6 +1567,13 @@ server.listen({ host: CFG.host, port: CFG.port }, () => {
   if (state.label) {
     log(`last label roll: ${state.label.barcode}${state.label.tpl ? ` (${state.label.tpl.name || "?"}, cached size)` : ""}`);
   }
+  if (LAST_CRASH) log(`last crash: ${LAST_CRASH.at} (v${LAST_CRASH.version || "?"}): ${LAST_CRASH.message}`);
+  crash.scheduleRecoveryCheck({
+    dataDir: CFG.dataDir,
+    afterMs: CRASH_RECOVERY_MS,
+    dismiss: (id) => supervisor.callService("persistent_notification", "dismiss", { notification_id: id }),
+    log,
+  });
   const waiting = queue.pending().length;
   if (waiting) log(`${waiting} print job(s) waiting from before the restart`);
   queue.start(runJob);

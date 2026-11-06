@@ -3,6 +3,22 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.3.2
+- **Crash loops are no longer silent.** When the print server keeps crashing,
+  restarts now wait longer each time (2 s, doubling up to 5 min) instead of
+  every 2 s forever. After 5 quick crashes in a row Home Assistant gets one
+  notification with the error. It goes away by itself once the server has
+  stayed up for 10 minutes. Queued labels are kept.
+- A fatal error is now logged as one clear `FATAL:` line and remembered:
+  `/status` and the diagnostics show `last_crash` (time, version, message)
+  after the restart.
+- Bluetooth: dropped the unmaintained native `usocket` module (the cause of
+  the 1.3.0 crash). The D-Bus client now uses Node's own socket.
+- The image build now runs a Bluetooth/D-Bus smoke test on the final Node.js,
+  so this kind of break fails the build instead of the printer.
+- The log and `/diag` showed `v1.3.0` on 1.3.1; versions are now kept in sync
+  (checked by a test).
+
 ## 1.3.1
 - **Fix: Bluetooth printing crashed the print server** on 1.3.0 ("TypeError:
   util.isError is not a function"). The new Alpine 3.24 base ships Node 24,

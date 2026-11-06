@@ -32,6 +32,13 @@ RUN apk add --no-cache nodejs npm build-base python3 pkgconf linux-headers eudev
 WORKDIR /usr/local/lib/niimblue-print
 COPY rootfs/usr/local/lib/niimblue-print/package.json rootfs/usr/local/lib/niimblue-print/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
+# dbus-next needs its optional native usocket only to pass file descriptors
+# over D-Bus, which noble's BlueZ binding never does; without it dbus-next uses
+# Node's own net socket. usocket 0.3 is unmaintained and broke on Node 24
+# (util.isError, 1.3.0 crash), so drop it and make sure it stays gone.
+RUN rm -rf node_modules/usocket \
+    && ! node -e 'require.resolve("usocket", {paths:[require.resolve("dbus-next")]})' 2>/dev/null \
+    && echo "[build] usocket removed: dbus-next uses net"
 # noble must resolve its BlueZ D-Bus binding + dbus-next (BLE shares HA's
 # adapter); fail the build loudly if not.
 RUN NOBLE=$(dirname "$(node -p 'require.resolve("@stoprocent/noble/package.json", {paths:[require.resolve("@mmote/niimbluelib", {paths:[require.resolve("@mmote/niimblue-node")]})]})')") \
@@ -62,6 +69,13 @@ COPY rootfs/ /
 RUN chmod +x /run.sh /usr/local/bin/*.sh \
     && node -e 'require("/usr/local/lib/niimblue-print/fonts.js").loadFont("bold")' \
     && node --check /usr/local/bin/print-server.js
+# Bluetooth stack smoke test on the final Node + modules: dbus-next (as noble
+# resolves it) against a throwaway private bus. Catches runtime breaks the
+# fake-printer e2e can't see (it never touches D-Bus). dbus is removed again.
+RUN apk add --no-cache --virtual .dbus-smoke dbus \
+    && pid=$(dbus-daemon --session --fork --print-pid --address=unix:path=/tmp/smoke-bus) \
+    && { DBUS_SYSTEM_BUS_ADDRESS=unix:path=/tmp/smoke-bus node /usr/local/bin/dbus-smoke.js; rc=$?; } \
+    ; kill $pid 2>/dev/null; rm -f /tmp/smoke-bus; apk del --no-cache .dbus-smoke >/dev/null; exit ${rc:-1}
 
 EXPOSE 8099 5000
 CMD [ "/run.sh" ]

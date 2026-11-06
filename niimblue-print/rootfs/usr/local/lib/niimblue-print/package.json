@@ -1,6 +1,6 @@
 {
   "name": "niimblue-print-server-lib",
-  "version": "1.3.0",
+  "version": "1.3.2",
   "private": true,
   "description": "Print server of the NiimBlue Print add-on: niimblue-node + text labels, templates, queue, history, MQTT, notifications. Installed with npm ci from the lockfile (reproducible).",
   "license": "MIT",
