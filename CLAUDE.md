@@ -58,9 +58,23 @@ If HA shows an old "Neueste Version" after a push:
   hoists node-gyp 7, which breaks noble's native build on Python >= 3.12.
   After changing deps: `npm install` there (needs registry access), commit
   the lockfile. `.dockerignore` keeps host-built node_modules out.
-- NiimBlue is pinned (Dockerfile NIIMBLUE_REF tag + NIIMBLUE_SHA check);
-  `patch/patch-niimblue-src.js` and `patch-niimbluelib.sh` exit 1 when an
-  anchor is missing — re-check them when bumping.
+- NiimBlue is pinned (Dockerfile NIIMBLUE_REF tag + NIIMBLUE_SHA check;
+  v2026.10.1 since 1.4.0); `patch/patch-niimblue-src.js` and
+  `patch-niimbluelib.sh` exit 1 when an anchor is missing or matches more
+  than once — re-check them when bumping. patch-niimblue-src.js does:
+  BrowserWarning off; PrintPreview (`src/components/dialogs/`, settings in
+  `params`) Print button -> host `/print` with all pages, own `hostPrinting`
+  state (NiimBlue's `printState` drives its BLE cancel UI), grayscale option
+  disabled (host is 1-bit); LabelDesigner object clipboard (Ctrl+C/X/V via
+  copy/cut/paste events, MIME `application/x-niimblue-objects+json`,
+  tab-local fallback when no copy event fires).
+- Testing the designer: don't `npm ci` NiimBlue on the host (auto mode
+  blocks third-party install scripts). Build the image with Docker, then
+  `docker create` + `docker cp :/opt/niimblue`, serve with
+  `python3 -m http.server` on 127.0.0.1 (8765 is taken by Thunderbird) and
+  drive it in Chrome. CDP key events do NOT trigger native copy/paste, so
+  dispatch `ClipboardEvent`s with a `DataTransfer` from JS instead. The
+  designer's unsaved-changes prompt blocks navigating/closing test tabs.
 - Base images pinned to `:3.24` (build.yaml). armv7 dropped: sharp has no
   linuxmusl-arm binary.
 - print-server.js imports niimblue-node internals (printImages, ImageEncoder)

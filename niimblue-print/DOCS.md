@@ -23,13 +23,27 @@ queue, **Reconnect**) and tabs:
 
 | Tab | What |
 |---|---|
-| **Designer** | NiimBlue, unchanged. Print bar bottom-right: copies, **🖨 Print via host**, **💾** = save the canvas as an *image* template |
+| **Designer** | NiimBlue (v2026.10.1). Print bar bottom-right: copies, **🖨 Print via host**, **💾** = save the canvas as an *image* template. The preview's **Print** button also prints via the host (every page of a CSV label) |
 | **Quick print** | Type text (one line per line), wrap / bold / border / alignment / font size, optional QR code and barcode, **live preview** of exactly what prints, Print, *Save as template* |
 | **Templates** | Your templates with preview, a field per `{{variable}}`, copies, Print, Delete, *Edit in Quick print* |
 | **History** | The last prints with thumbnails, source, status and **Reprint** |
 | **Diagnostics** | Print queue (cancel / retry), printer info (model, serial, firmware, signal), **Test print**, **Scan**, connection events, raw `/diag` |
 
 It works in the HA app on phones too.
+
+### Designer keyboard shortcuts
+
+| Keys | Does |
+|---|---|
+| **Ctrl+C** / **Ctrl+X** | copy / cut the selected objects (also their text, for other apps) |
+| **Ctrl+V** | paste copied objects (again = offset a bit; works across labels and browser tabs). Text or an image copied elsewhere becomes a new text box / image |
+| **Ctrl+D** | duplicate the selection |
+| **Ctrl+Z** / **Ctrl+Y** | undo / redo |
+| **Delete**, arrows (**Ctrl**+arrow = 1 px) | delete, move |
+
+Mac: **Cmd** instead of Ctrl. Opening the Designer tab gives it the keyboard
+focus. Grayscale post-processing is disabled in the preview: the add-on
+prints black and white (dithering options work).
 
 ## Transports
 

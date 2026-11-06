@@ -84,7 +84,17 @@
     if (name === "designer" && $("designer").getAttribute("src") === "about:blank") $("designer").src = "designer/";
     store("tab", name);
     if (loaders[name]) loaders[name]();
+    // Keyboard shortcuts (Ctrl+V/C/Z, Delete, arrows) go to the focused
+    // document: hand focus to the designer frame, not this shell.
+    if (name === "designer") focusDesigner();
   }
+  function focusDesigner() {
+    var f = $("designer");
+    setTimeout(function () {
+      try { if (current === "designer" && f.contentWindow) f.contentWindow.focus(); } catch (e) { /* not loaded yet */ }
+    }, 0);
+  }
+  $("designer").addEventListener("load", focusDesigner);
   document.querySelectorAll(".tabs button").forEach(function (b) {
     b.addEventListener("click", function () { showTab(b.dataset.tab); });
   });

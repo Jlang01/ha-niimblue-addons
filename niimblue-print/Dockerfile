@@ -11,8 +11,8 @@ ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.24
 # build-time patches (which also fail the build when they don't apply).
 FROM ${BUILD_FROM} AS designer
 RUN apk add --no-cache nodejs npm git
-ARG NIIMBLUE_REF=v2026.9.0
-ARG NIIMBLUE_SHA=82c5605780818299422a6acdf3180d87c569578d
+ARG NIIMBLUE_REF=v2026.10.1
+ARG NIIMBLUE_SHA=937200ff498653d74924ca30d473318dfaf91bd9
 RUN git clone --depth 1 --branch ${NIIMBLUE_REF} https://github.com/MultiMote/niimblue.git /src \
     && test "$(git -C /src rev-parse HEAD)" = "${NIIMBLUE_SHA}" \
     || { echo "NiimBlue ${NIIMBLUE_REF} is not commit ${NIIMBLUE_SHA}"; exit 1; }

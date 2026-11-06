@@ -3,6 +3,26 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.4.0
+- **Copy / cut / paste designer objects** with Ctrl+C / Ctrl+X / Ctrl+V
+  (Cmd on Mac). Before, Ctrl+V only inserted whatever text or image was on
+  the system clipboard, so copying an object and pasting it gave some old
+  text instead. Pasting again offsets the copy a bit, and it works between
+  labels and browser tabs. Text and images copied from elsewhere still
+  paste as a new text box / image.
+- The Designer tab now gets the keyboard focus when opened, so shortcuts
+  work without clicking into the canvas first.
+- NiimBlue designer updated to **v2026.10.1** (was v2026.9.0): fixed
+  CODE128 barcode encoding, new barcode engine, "apply RFID dimensions"
+  in the printer menu, arrow keys move 1 px without the grid, position
+  boxes update while dragging, screentone effect, editable numbers for the
+  preview sliders, larger dialogs, printhead warnings shown directly.
+- The preview's **Print** button prints **every page** of a CSV label
+  through the host (before: only the first page) and shows a "Printed"
+  message.
+- Grayscale post-processing is disabled in the preview: the add-on prints
+  black and white, so grayscale would have printed as a hard 50 % cut.
+
 ## 1.3.2
 - **Crash loops are no longer silent.** When the print server keeps crashing,
   restarts now wait longer each time (2 s, doubling up to 5 min) instead of
