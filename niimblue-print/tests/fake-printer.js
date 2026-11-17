@@ -10,6 +10,7 @@
  *   offline       connect() fails ("Device not found")
  *   lid_open      heartbeat says lid open, print fails with PrintError 1
  *   drop_mid_job  the link drops after the first page started
+ *   roll_4l       RFID reports the 4-lane roll T10*20/4L (barcode 12222118)
  * Env: FAKE_RFID_REMAINING (150), FAKE_BATTERY (80)
  */
 const Module = require("module");
@@ -56,7 +57,9 @@ class FakeClient {
   getPrintTaskType() { return "D110"; }
   getRfidInfo() {
     const remaining = Number(process.env.FAKE_RFID_REMAINING || 150);
-    return { labelRfidInfo: { tagPresent: true, barCode: "10262260", uuid: "fake-uuid-1", serialNumber: "S1",
+    // roll_4l: a 4-lane roll (T10*20/4L, barcode of the real one)
+    const barCode = flag("roll_4l") ? "12222118" : "10262260";
+    return { labelRfidInfo: { tagPresent: true, barCode, uuid: "fake-uuid-1", serialNumber: "S1",
       allPaper: 230, usedPaper: 230 - remaining, consumablesType: 1 } };
   }
   async fetchRfidInfo() { return this.getRfidInfo(); }

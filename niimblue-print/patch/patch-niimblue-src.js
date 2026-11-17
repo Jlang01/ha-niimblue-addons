@@ -9,6 +9,9 @@
 //      post-processing is disabled (the host prints black/white only).
 //   3. LabelDesigner  -> object clipboard: Ctrl+C / Ctrl+X / Ctrl+V copy, cut
 //      and paste designer objects (NiimBlue itself only pastes OS text/images).
+//   4. LabelPropsEditor -> "Use detected roll" button (size, direction and
+//      lane split of the roll in the printer) + warnings when the size does
+//      not fit that roll.
 // A patch that does not apply FAILS the build: otherwise e.g. the preview's
 // Print button would silently fall back to Web Bluetooth (which cannot reach
 // the printer on the HA host). Re-check these anchors when bumping NiimBlue.
@@ -259,6 +262,114 @@ patchFile("src/components/LabelDesigner.svelte", (s) => {
     must(s.includes(need), `LabelDesigner: ${need} not available`);
   }
   console.log("[patch-src] object clipboard (Ctrl+C/X/V) added");
+  return s;
+});
+
+// 4) LabelPropsEditor: "Use detected roll" + fit warnings ------------------
+// The add-on knows the roll in the printer (RFID -> NIIMBOT cloud, incl. the
+// lane count of multi-lane rolls like "T10*20/4L"): /api/status -> label.
+// designer = { printDirection, width, height (px), split, splitParts, lanes,
+// lane_width_mm, lane_height_mm } (label-size.js designerLayout). The button
+// fills the form like a preset (Apply still applies); warnings check the
+// FORM values, so they update while editing.
+patchFile("src/components/dialogs/LabelPropsEditor.svelte", (s) => {
+  const state = `  let modalRef: AppModal;
+
+  // [nbhost] label roll detected by the add-on
+  type NbhostDesigner = {
+    printDirection: PrintDirection; width: number; height: number; split: LabelSplit; splitParts: number;
+    lanes: number; lane_width_mm: number; lane_height_mm: number;
+  };
+  type NbhostRoll = { name?: string | null; barcode?: string; width_mm?: number | null; height_mm?: number | null; designer?: NbhostDesigner | null };
+  let nbhostRoll = $state<NbhostRoll | null>((window as any).NIIMBLUE_LABEL ?? null);
+  const nbhostLoadRoll = async () => {
+    try {
+      const cfg = (window as any).NIIMBLUE_HOST || {};
+      const r = await fetch((cfg.apiBase || "../api") + "/status", { cache: "no-store" });
+      if (r.ok) nbhostRoll = (await r.json()).label ?? null;
+    } catch (e) {
+      /* keep the value from page load */
+    }
+  };
+  onMount(() => {
+    nbhostLoadRoll();
+  });
+  const nbhostRollName = $derived(nbhostRoll ? nbhostRoll.name || nbhostRoll.barcode || "?" : "");
+  const nbhostUseRoll = () => {
+    const d = nbhostRoll?.designer;
+    if (!d) return;
+    prevUnit = "px";
+    unit = "px";
+    width = d.width;
+    height = d.height;
+    printDirection = d.printDirection;
+    if (d.lanes > 1) {
+      shape = shape === "circle" ? "rect" : shape;
+      split = d.split;
+      splitParts = d.splitParts;
+      if (mirror === "flip" && d.splitParts !== 2) mirror = "copy";
+    } else {
+      if (shape === "circle" && width !== height) shape = "rect";
+      split = "none";
+      mirror = "none";
+    }
+    tailLength = 0;
+    selectedPresetIndex = -1;
+  };
+  // form values in px (what Apply would set)
+  const nbhostRollWarnings = $derived.by<string[]>(() => {
+    const d = nbhostRoll?.designer;
+    if (!d) return [];
+    const out: string[] = [];
+    const k = unit === "mm" ? dpmm : 1;
+    const top = printDirection === "top";
+    const across = Math.round((top ? width : height) * k);
+    const feed = Math.round((top ? height : width) * k);
+    const rollAcross = d.printDirection === "top" ? d.width : d.height;
+    const rollFeed = d.printDirection === "top" ? d.height : d.width;
+    const roll = \`\${nbhostRollName} (\${top ? rollAcross : rollFeed}x\${top ? rollFeed : rollAcross} px in this direction)\`;
+    if (across > rollAcross + 8) {
+      out.push(\`Does not fit the roll in the printer: \${across} px across the printhead, the label is only \${rollAcross} px (\${roll}). The edges print beside the label.\`);
+    } else if (Math.abs(across - rollAcross) > 8 || Math.abs(feed - rollFeed) > 8) {
+      out.push(\`Size does not match the roll in the printer, \${roll}: prints are scaled to fit the label.\`);
+    }
+    if (d.lanes > 1) {
+      const want = top ? "vertical" : "horizontal";
+      if (split !== want || splitParts !== d.lanes) {
+        out.push(\`The roll has \${d.lanes} labels side by side (one print = one row): set Label split to \${want}, \${d.lanes} parts, to design each label.\`);
+      }
+    }
+    return out;
+  });
+`;
+  s = replaceOnce(s, "  let modalRef: AppModal;\n", state, "roll state");
+
+  s = replaceOnce(s, "  {#each warnings as line (line)}\n",
+    '  {#if nbhostRoll?.designer}\n' +
+    '    <div class="mb-2 d-flex align-items-center gap-2 flex-wrap">\n' +
+    '      <button class="btn btn-sm btn-outline-info" onclick={nbhostUseRoll} title="Fill in the size of the label roll in the printer, then press Apply">\n' +
+    '        <MdIcon icon="label" /> Use detected roll\n' +
+    '      </button>\n' +
+    '      <span class="text-secondary small">\n' +
+    '        {nbhostRollName}{#if nbhostRoll.width_mm} · {nbhostRoll.width_mm}×{nbhostRoll.height_mm} mm{/if}\n' +
+    '        {#if nbhostRoll.designer.lanes > 1}\n' +
+    '          · {nbhostRoll.designer.lanes} labels side by side, each {nbhostRoll.designer.lane_width_mm}×{nbhostRoll.designer.lane_height_mm} mm.\n' +
+    '          Mirror “copy” repeats the first label on all of them.\n' +
+    '        {/if}\n' +
+    '      </span>\n' +
+    '    </div>\n' +
+    '  {/if}\n\n' +
+    '  {#each nbhostRollWarnings as line (line)}\n' +
+    '    <div class="mb-1 text-warning">{line}</div>\n' +
+    '  {/each}\n\n' +
+    "  {#each warnings as line (line)}\n",
+    "roll button + warnings markup");
+
+  for (const need of ["import { onMount, tick } from \"svelte\";", "type LabelSplit,", "import type { PrintDirection }",
+    "let selectedPresetIndex", "let prevUnit", "let dpmm", "let mirror", "let shape", "let tailLength", "import MdIcon"]) {
+    must(s.includes(need), `LabelPropsEditor: ${need} not available`);
+  }
+  console.log("[patch-src] label props: detected roll button + fit warnings");
   return s;
 });
 

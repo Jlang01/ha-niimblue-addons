@@ -35,10 +35,18 @@
   // image is rotated, so its height does. Design at the WHOLE label size (like
   // NiimBlue's own 50x30 preset = 400x240); the server centre-crops what is
   // wider than the printhead, as the NIIMBOT app does.
+  // Multi-lane rolls (e.g. "T10*20/4L" = 4 labels side by side) come with a
+  // designer layout from the server (L.designer): the direction that makes
+  // every lane landscape + NiimBlue's label split, one part per lane.
   function labelPx(L) {
+    var d = L && L.designer;
+    if (d && d.width && d.height) {
+      return { w: d.width, h: d.height, dir: d.printDirection, split: d.split, parts: d.splitParts, lanes: d.lanes };
+    }
     var across = L && (L.full_across_px || L.across_px);
     if (!across || !L.feed_px) return null;
-    return DIR === "left" ? { w: L.feed_px, h: across } : { w: across, h: L.feed_px };
+    return DIR === "left" ? { w: L.feed_px, h: across, dir: DIR, split: "none", parts: 1, lanes: 1 }
+      : { w: across, h: L.feed_px, dir: DIR, split: "none", parts: 1, lanes: 1 };
   }
 
   function readLabelProps() {
@@ -49,16 +57,27 @@
   (function preselectLabel(L) {
     var px = labelPx(L);
     if (!px) return;
-    var key = L.barcode + ":" + px.w + "x" + px.h + ":" + DIR;
+    var key = L.barcode + ":" + px.w + "x" + px.h + ":" + px.dir + ":" + px.split + px.parts;
     try {
       if (localStorage.getItem("nbhost_label_applied") === key) return;
       var props = readLabelProps();
       if (!props || typeof props !== "object") props = {};
-      props.printDirection = DIR;
+      props.printDirection = px.dir;
       props.size = { width: px.w, height: px.h };
+      if (px.lanes > 1) {
+        props.split = px.split;
+        props.splitParts = px.parts;
+        if (props.shape === "circle") props.shape = "rect";
+        if (props.mirror === "flip" && px.parts !== 2) props.mirror = "copy";
+      } else if (props.split && props.split !== "none") {
+        props.split = "none";
+        props.mirror = "none";
+      }
+      props.tailLength = 0;
       localStorage.setItem("last_label_props", JSON.stringify(props));
       localStorage.setItem("nbhost_label_applied", key);
-      preselected = (L.name || L.barcode) + " (" + px.w + "x" + px.h + " px)";
+      preselected = (L.name || L.barcode) + " (" + px.w + "x" + px.h + " px" +
+        (px.lanes > 1 ? ", " + px.lanes + " labels side by side" : "") + ")";
     } catch (e) { /* storage blocked: just show the label */ }
   })(window.NIIMBLUE_LABEL);
 
@@ -203,18 +222,27 @@
     chip.textContent = "🏷 " + (L.name || L.barcode) + " · " + size +
       (L.remaining != null ? " · " + L.remaining + " left" : "");
     var tip = "Label roll in the printer: " + (L.name || "?") + "\nbarcode " + L.barcode +
-      (px ? "\nlabel " + px.w + "×" + px.h + " px (direction " + DIR + ")" : "") +
+      (px ? "\nlabel " + px.w + "×" + px.h + " px (direction " + px.dir + ")" : "") +
+      (px && px.lanes > 1 ? "\n" + px.lanes + " labels side by side, each " + L.designer.lane_width_mm + "×" +
+        L.designer.lane_height_mm + " mm: one print = one row" : "") +
       (L.clipped ? "\nwider than the printhead: " + L.crop_each_side_px + " px are cut on each side " +
         "(printed " + L.width_px + "×" + L.height_px + " px)" : "") +
       (L.remaining != null ? "\n" + L.remaining + " of " + L.total + " labels left" : "") +
       "\nsize source: " + (L.source || "none (no auto size)");
     chip.style.color = "#cfd8dc";
     var props = readLabelProps();
-    if (px && props && props.size && (props.size.width !== px.w || props.size.height !== px.h)) {
+    // same physical size in either direction is fine (width/height swap)
+    var sameSize = px && props && props.size && (props.printDirection === px.dir
+      ? props.size.width === px.w && props.size.height === px.h
+      : props.size.width === px.h && props.size.height === px.w);
+    if (px && props && props.size && !sameSize) {
       chip.style.color = "#ffb300";
       tip += "\n\nDesigner canvas is " + props.size.width + "×" + props.size.height +
         " px; prints are scaled to the label (image_fit) unless label_width/height are set." +
-        "\nTo design 1:1, set the label size to " + px.w + "×" + px.h + " px.";
+        "\nLabel properties → \"Use detected roll\" sets " + px.w + "×" + px.h + " px.";
+    } else if (px && px.lanes > 1 && props && (props.split || "none") === "none") {
+      chip.style.color = "#ffb300";
+      tip += "\n\nThe designer has no label split: Label properties → \"Use detected roll\" shows the " + px.lanes + " labels.";
     }
     chip.title = tip;
     chip.style.display = "";

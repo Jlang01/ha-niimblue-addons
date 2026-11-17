@@ -495,10 +495,20 @@ function labelGeometry(printDirection) {
   });
 }
 
+/** Designer layout (size, direction, lane split) of the current roll, or null. */
+function labelDesigner() {
+  if (!state.label || !state.label.tpl) return null;
+  const meta = state.meta || {};
+  return labelSize.designerLayout(state.label.tpl, {
+    printheadPx: meta.printheadPixels, dpi: meta.dpi, printDirection: CFG.printDirection,
+  });
+}
+
 function labelStatus() {
   const L = state.label;
   if (!L) return null;
   const g = labelGeometry(CFG.printDirection);
+  const d = labelDesigner();
   const remaining = L.total !== null && L.used !== null ? Math.max(0, L.total - L.used) : null;
   return {
     barcode: L.barcode,
@@ -523,6 +533,11 @@ function labelStatus() {
     clipped: g ? g.clipped : null,
     crop_each_side_px: g ? g.crop_each_side_px : null,
     blind_zone: g ? g.blind_zone : null,
+    // labels side by side across the head (from the roll name, e.g. "/4L");
+    // one print = one row of `lanes` labels
+    lanes: d ? d.lanes : 1,
+    // what the designer should be set to (NiimBlue label props)
+    designer: d,
     paper_type: autoLabelType(),            // label type sent with prints (1 gap, 2 black mark, 5 transparent)
     dpi: g ? g.dpi : null,
     serial: L.serial,
@@ -979,7 +994,14 @@ function targetSize(o, printDirection) {
  */
 const FALLBACK_TEXT_SIZE = { width: 384, height: 240 };
 function textCanvas(body = {}) {
-  const dir = body.printDirection === "left" || body.printDirection === "top" ? body.printDirection : CFG.printDirection;
+  const explicitDir = body.printDirection === "left" || body.printDirection === "top";
+  const sized = [body.labelWidth, body.labelHeight].some((v) => v !== undefined && v !== null && v !== "") ||
+    (CFG.labelWidth > 0 && CFG.labelHeight > 0);
+  // multi-lane roll, sized from the roll: default to the designer direction
+  // (each lane landscape), and lay the text out per lane (features.js)
+  const d = !sized ? labelDesigner() : null;
+  const multi = d && d.lanes > 1 && !(explicitDir && body.printDirection !== d.printDirection) ? d : null;
+  const dir = explicitDir ? body.printDirection : multi ? multi.printDirection : CFG.printDirection;
   const top = dir === "top";
   const head = (state.meta && state.meta.printheadPixels) || labelSize.DEFAULT_PRINTHEAD_PX;
   const g = labelGeometry(dir);
@@ -1003,7 +1025,14 @@ function textCanvas(body = {}) {
   const margins = top
     ? { top: blind.feed_start_px, bottom: blind.feed_end_px, left: 0, right: 0 }
     : { left: blind.feed_start_px, right: blind.feed_end_px, top: 0, bottom: 0 };
-  return { width: w, height: h, margins, printDirection: dir, from };
+  const out = { width: w, height: h, margins, printDirection: dir, from };
+  // lanes only when the row fits the head uncut (else lane edges move)
+  if (multi && g && !g.clipped && (top ? w : h) === g.full_across_px) {
+    out.lanes = multi.lanes;
+    out.laneAxis = top ? "x" : "y";
+    out.from += ` (${multi.lanes} lanes)`;
+  }
+  return out;
 }
 
 // ---- auto print settings ------------------------------------------------------

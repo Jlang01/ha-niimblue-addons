@@ -118,3 +118,12 @@ If HA shows an old "Neueste Version" after a push:
   (pure, exported: `labelCanvas`, `centreCropAcross`, `blindZone` — reuse it,
   don't duplicate size math). Overwidth is centre-cropped like the app
   (50 mm roll = 400 px -> 384 px head, 8 px cut each side).
+- Multi-lane rolls (1.5.0): lane count from the roll NAME (`/4L`,
+  `lanesFromName`); the cloud template is the whole row (T10*20/4L = 40x20
+  mm). `designerLayout` picks the direction that makes each lane landscape
+  (4L -> "left", 160x320, split horizontal x4) -> `/status` label.designer,
+  used by host-print.js preset + the LabelPropsEditor patch ("Use detected
+  roll" + fit warnings on FORM values). Text: core.textCanvas sets
+  `lanes`/`laneAxis` (only when sized from the roll, not clipped, direction
+  not overridden), features.js renders one lane and tiles it. Real print
+  orientation on a 4L roll not yet verified on hardware.

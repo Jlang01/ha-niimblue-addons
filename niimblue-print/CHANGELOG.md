@@ -3,6 +3,25 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.5.0
+- **Multi-lane label rolls** (several labels side by side, e.g.
+  `T10*20/4L` = 4 labels of 10 × 20 mm): the lane count is read from the
+  roll name. The printer sees one row as one label, so one print = one row.
+  - The designer is set to the roll automatically, with NiimBlue's *label
+    split* showing every label. Lanes are laid out so each label is edited
+    landscape: for `T10*20/4L` that is print direction *left*, 160 × 320 px,
+    split into 4 parts of 20 × 10 mm. Label properties → Mirror “copy”
+    repeats the first label on all of them.
+  - Quick-print text (and text templates) is laid out on one label and
+    repeated on every lane, instead of running across the gaps.
+  - The status bar shows the lane count.
+- **Label properties: “Use detected roll”** fills in the size, direction and
+  lane split of the roll in the printer (then press Apply), plus warnings
+  when the size entered does not fit that roll (wider than the label, or
+  scaled to fit) or the lane split is missing.
+- The automatic designer preset is applied again once after this update
+  (it now includes the lane split).
+
 ## 1.4.0
 - **Copy / cut / paste designer objects** with Ctrl+C / Ctrl+X / Ctrl+V
   (Cmd on Mac). Before, Ctrl+V only inserted whatever text or image was on

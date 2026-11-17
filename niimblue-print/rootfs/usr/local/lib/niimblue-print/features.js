@@ -32,7 +32,7 @@ const MAX_COUNTER_LABELS = 100;   // one rendered page per label when {{counter}
  *   sharp, log, RestError,
  *   enqueue(opts, pages[{buf, quantity}], ctx) -> job      (validates, queues)
  *   respond(job, body) -> response (200 printed / 202 queued / error)
- *   textCanvas(body) -> { width, height, margins, printDirection, from }
+ *   textCanvas(body) -> { width, height, margins, printDirection, from, lanes?, laneAxis? }
  *   testInfo() -> { label, density }
  *   templates: TemplateStore, history: History, queue: PrintQueue,
  * }
@@ -78,11 +78,44 @@ function createFeatures(core) {
 
   async function render(spec, canvas, threshold) {
     try {
+      if (canvas.lanes > 1) return await renderLanes(spec, canvas, threshold);
       return await renderText({ ...spec, _normalized: true }, canvas, { sharp, threshold });
     } catch (e) {
       if (e.status === 400) throw new RestError(e.message, 400);
       throw e;
     }
+  }
+
+  /**
+   * Multi-lane roll (canvas.lanes from core.textCanvas): lay the label out on
+   * ONE lane and repeat it on every lane of the row, so the text does not
+   * run across the gaps between the labels. Lane edges are rounded to whole
+   * px; the layout returned is the lane's.
+   */
+  async function renderLanes(spec, canvas, threshold) {
+    const n = canvas.lanes;
+    const alongX = canvas.laneAxis === "x";
+    const total = alongX ? canvas.width : canvas.height;
+    const edge = (i) => Math.round((total * i) / n);
+    const tiles = [];
+    let first = null;
+    for (let i = 0; i < n; i++) {
+      const size = edge(i + 1) - edge(i);
+      const laneCanvas = { ...canvas, lanes: 1, width: alongX ? size : canvas.width, height: alongX ? canvas.height : size };
+      // equal lanes (the usual case) render once
+      if (!first || first.size !== size) {
+        const r = await renderText({ ...spec, _normalized: true }, laneCanvas, { sharp, threshold });
+        if (!first) first = { ...r, size };
+        tiles.push({ input: r.png, left: alongX ? edge(i) : 0, top: alongX ? 0 : edge(i) });
+      } else {
+        tiles.push({ input: first.png, left: alongX ? edge(i) : 0, top: alongX ? 0 : edge(i) });
+      }
+    }
+    let img = sharp({ create: { width: canvas.width, height: canvas.height, channels: 3, background: "#fff" } })
+      .composite(tiles).greyscale();
+    if (threshold) img = img.threshold(threshold).toColourspace("b-w");
+    const png = await img.png({ compressionLevel: 9 }).toBuffer();
+    return { png, layout: first.layout, spec: first.spec };
   }
 
   function normalize(body) {

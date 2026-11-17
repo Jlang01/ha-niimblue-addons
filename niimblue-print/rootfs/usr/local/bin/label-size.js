@@ -160,6 +160,56 @@ function labelCanvas(tpl, opts = {}) {
 }
 
 /**
+ * Labels side by side across the head, from the roll name. NIIMBOT names
+ * multi-lane rolls "<lane across>*<feed>/<N>L-...", e.g. "T10*20/4L-1200WHITE"
+ * = 4 labels of 10 x 20 mm next to each other; the cloud template is the whole
+ * row (40 x 20 mm). The printer knows nothing about lanes: its gap sensor sees
+ * one label per ROW, so one print = one row = N labels. 1 = single lane.
+ */
+function lanesFromName(name) {
+  const m = /\/(\d{1,2})L(?![a-z])/i.exec(String(name || ""));
+  const n = m ? Number(m[1]) : 1;
+  return n >= 2 && n <= 16 ? n : 1;
+}
+
+/**
+ * Designer layout for a parsed template: canvas size, print direction and
+ * NiimBlue label split. Single-lane rolls keep the configured direction. For
+ * multi-lane rolls the direction is chosen so that every lane is edited
+ * landscape (wider than tall): lanes taller than wide along the feed (e.g.
+ * 10 mm across x 20 mm feed) -> "left" (the canvas height runs across the
+ * head, lanes become stacked rows, split "horizontal"); otherwise "top" with
+ * a "vertical" split. Sizes are the WHOLE row (label_* of labelCanvas).
+ */
+function designerLayout(tpl, opts = {}) {
+  const lanes = lanesFromName(tpl && tpl.name);
+  let dir = opts.printDirection === "left" ? "left" : "top";
+  if (lanes > 1) {
+    const g0 = labelCanvas(tpl, { ...opts, printDirection: "top" });
+    dir = g0.feed_mm >= g0.across_mm / lanes ? "left" : "top";
+  }
+  const g = labelCanvas(tpl, { ...opts, printDirection: dir });
+  const top = dir === "top";
+  const lane = {
+    across_mm: Math.round((g.across_mm / lanes) * 100) / 100,
+    across_px: g.full_across_px / lanes,
+  };
+  return {
+    printDirection: dir,
+    width: g.label_width_px,
+    height: g.label_height_px,
+    split: lanes > 1 ? (top ? "vertical" : "horizontal") : "none",
+    splitParts: lanes > 1 ? lanes : 1,
+    lanes,
+    // one lane as edited in the designer (px, this direction)
+    lane_width_px: top ? lane.across_px : g.feed_px,
+    lane_height_px: top ? g.feed_px : lane.across_px,
+    lane_width_mm: top ? lane.across_mm : g.feed_mm,
+    lane_height_mm: top ? g.feed_mm : lane.across_mm,
+  };
+}
+
+/**
  * Feed-direction margins the printer cannot reliably print (app data, see
  * header), for keeping auto-laid-out content clear. px rounded up.
  */
@@ -192,6 +242,6 @@ function centreCropAcross(width, height, printDirection, printheadPx) {
 }
 
 module.exports = {
-  parseCloudTemplate, labelCanvas, orientMm, englishName, blindZone, centreCropAcross,
+  parseCloudTemplate, labelCanvas, orientMm, lanesFromName, designerLayout, englishName, blindZone, centreCropAcross,
   DEFAULT_DPI, DEFAULT_PRINTHEAD_PX, PAPER_GAP, PAPER_BLACK_MARK, PAPER_TRANSPARENT,
 };

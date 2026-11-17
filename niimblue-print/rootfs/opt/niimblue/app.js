@@ -124,8 +124,12 @@
       labelInfo = L;
       if (L) {
         var size = L.width_mm ? " · " + L.width_mm + "×" + L.height_mm + " mm" : "";
-        chip("st-label", "🏷 " + (L.name || L.barcode) + size,
-          "Label roll (RFID " + L.barcode + ")" + (L.width_px ? "\nprinted area " + L.width_px + "×" + L.height_px + " px" : ""));
+        var D = L.designer;
+        var lanes = D && D.lanes > 1 ? " · " + D.lanes + " lanes" : "";
+        chip("st-label", "🏷 " + (L.name || L.barcode) + size + lanes,
+          "Label roll (RFID " + L.barcode + ")" + (L.width_px ? "\nprinted area " + L.width_px + "×" + L.height_px + " px" : "") +
+          (lanes ? "\n" + D.lanes + " labels side by side, each " + D.lane_width_mm + "×" + D.lane_height_mm +
+            " mm: one print = one row; quick-print text is repeated on every label" : ""));
         chip("st-remaining", L.remaining != null ? L.remaining + " left" : "",
           L.total != null ? L.remaining + " of " + L.total + " labels left" : "", W.labels_low);
       } else {

@@ -85,7 +85,10 @@ const sup = http.createServer((req, res) => {
 fs.writeFileSync(path.join(DATA, "labels.json"), JSON.stringify({
   version: 1,
   labels: { 10262260: { name: "T50*30-230WHITE-NM", cloud_width_mm: 30, cloud_height_mm: 50, rotate: 270,
-    canvas_rotate: 90, dpi: 203, paper_type: 1, consumable_type: 1, fetched_at: "2026-10-10T00:00:00Z" } },
+    canvas_rotate: 90, dpi: 203, paper_type: 1, consumable_type: 1, fetched_at: "2026-10-10T00:00:00Z" },
+    // 4 labels of 10x20 mm side by side (real cloud name; size = the whole row)
+    12222118: { name: "T10*20/4L-1200WHITE", cloud_width_mm: 40, cloud_height_mm: 20, rotate: 0,
+      canvas_rotate: 0, dpi: 203, paper_type: 1, consumable_type: 1, fetched_at: "2026-11-17T00:00:00Z" } },
 }));
 
 let srv = null;
@@ -463,6 +466,32 @@ let brokerOn = false;
       assert.equal(r.status, 200, r.text);
       assert.equal(r.json.message, "Printed");
       assert.match(log, /image size 400x240 px \(label T50\*30-230WHITE-NM\)/);
+    });
+
+    await check("4-lane roll: status lanes + designer layout, text repeated per lane, direction left", async () => {
+      ctrl("roll_4l", true);
+      srv.kill("SIGKILL");
+      await sleep(300);
+      await startServer();
+      await until(async () => ((await call("GET", "/status")).json.label || {}).barcode === "12222118", 15000);
+      const L = (await call("GET", "/status")).json.label;
+      assert.equal(L.lanes, 4);
+      assert.deepEqual(
+        [L.designer.printDirection, L.designer.width, L.designer.height, L.designer.split, L.designer.splitParts],
+        ["left", 160, 320, "horizontal", 4]);
+      const j = (await call("POST", "/preview/text", { text: "Salz", format: "json" })).json;
+      assert.deepEqual([j.width, j.height], [160, 80]);          // laid out on one lane
+      assert.match(j.size_from, /4 lanes/);
+      const meta = await sharp(Buffer.from(j.image, "base64")).metadata();
+      assert.deepEqual([meta.width, meta.height], [160, 320]);   // the whole row
+      fs.writeFileSync(path.join(OUT, "text-4lanes.png"), Buffer.from(j.image, "base64"));
+      const r = await call("POST", "/print/text", { text: "Salz", quantity: 1 });
+      assert.equal(r.status, 200, r.text);
+      assert.match(log, /direction left/);
+      // explicit direction top: no lane layout (row as one label)
+      const t = (await call("POST", "/preview/text", { text: "Salz", format: "json", printDirection: "top" })).json;
+      assert.deepEqual([t.width, t.height], [320, 160]);
+      ctrl("roll_4l", false);
     });
   } finally {
     if (mc) mc.end(true);
