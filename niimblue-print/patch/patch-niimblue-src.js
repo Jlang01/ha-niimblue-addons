@@ -9,6 +9,9 @@
 //      post-processing is disabled (the host prints black/white only).
 //   3. LabelDesigner  -> object clipboard: Ctrl+C / Ctrl+X / Ctrl+V copy, cut
 //      and paste designer objects (NiimBlue itself only pastes OS text/images).
+//      + window.nbhostDesigner { exportLabel(), open(label) } for the add-on:
+//      prints carry their editable design; history / image templates open
+//      in the designer.
 //   4. LabelPropsEditor -> "Use detected roll" button (size, direction and
 //      lane split of the roll in the printer) + warnings when the size does
 //      not fit that roll.
@@ -70,7 +73,9 @@ patchFile("src/components/dialogs/PrintPreview.svelte", (s) => {
         });
       }
       const cfg = window.NIIMBLUE_HOST || {};
-      const body = { pages, printDirection: labelProps.printDirection || "top", density: params.density, quantity: params.quantity };
+      // the design itself, so the history can open it in the designer again
+      const design = { canvas: canvasCallback(), label: $state.snapshot(labelProps), ...(csvEnabled ? { csv: { data: csvData } } : {}) };
+      const body = { pages, printDirection: labelProps.printDirection || "top", density: params.density, quantity: params.quantity, design };
       if (cfg.model) body.printTask = cfg.model;
       const r = await fetch((cfg.apiBase || "../api") + "/print", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -262,6 +267,36 @@ patchFile("src/components/LabelDesigner.svelte", (s) => {
     must(s.includes(need), `LabelDesigner: ${need} not available`);
   }
   console.log("[patch-src] object clipboard (Ctrl+C/X/V) added");
+
+  // window.nbhostDesigner: the add-on's print bar exports the editable design
+  // with every print / image template, the sidebar shell opens history
+  // entries and templates ("Open in designer") through open().
+  s = replaceOnce(s, "  import {\n    type ExportedLabelTemplate,\n",
+    "  import {\n    ExportedLabelTemplateSchema,\n    type ExportedLabelTemplate,\n", "ExportedLabelTemplateSchema import");
+  s = replaceOnce(s, '    window.addEventListener("hashchange", loadLabelFromUrl);\n',
+    '    window.addEventListener("hashchange", loadLabelFromUrl);\n' +
+    "    // [nbhost] hooks for the add-on (print bar, sidebar shell)\n" +
+    "    (window as any).nbhostDesigner = {\n" +
+    "      exportLabel: () => {\n" +
+    "        const l: any = exportCurrentLabel();\n" +
+    "        delete l.thumbnailBase64;\n" +
+    "        return l;\n" +
+    "      },\n" +
+    "      open: async (raw: unknown): Promise<boolean> => {\n" +
+    "        const label = ExportedLabelTemplateSchema.parse(raw);\n" +
+    "        if (hasUnsavedChanges) {\n" +
+    "          const r = await appConfirm({ title: \"Replace the label in the designer? Its unsaved changes are lost.\", buttons: [\"yes\", \"no\"] });\n" +
+    "          if (r !== \"yes\") return false;\n" +
+    "        }\n" +
+    "        onLoadRequested(label);\n" +
+    "        return true;\n" +
+    "      },\n" +
+    "    };\n",
+    "nbhostDesigner hooks");
+  for (const need of ["const exportCurrentLabel = ", "const onLoadRequested = ", "import { appConfirm }", "let hasUnsavedChanges"]) {
+    must(s.includes(need), `LabelDesigner: ${need} not available`);
+  }
+  console.log("[patch-src] designer hooks (export / open) added");
   return s;
 });
 

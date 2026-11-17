@@ -3,6 +3,30 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.6.0
+- **Open in designer** from the History and Templates tabs. Labels printed
+  from the designer (Preview → Print or the 🖨 button) and image templates
+  saved with 💾 now keep their design, so they open fully editable, with the
+  label size, direction and lane split. Text / quick prints, MQTT prints and
+  older entries open as their printed image on a label of the right size.
+  The designer asks before replacing unsaved changes.
+- Fix: **labels narrower than the printhead were printed off-centre.** The
+  printer does not centre a narrower image: on the 40 mm 4-lane roll the
+  row came out 4 mm to one side (first label missing, the next on the cut
+  line). Prints are now centred on the head. The roll itself needs no
+  alignment: the holder centres it and the printer only detects the gaps.
+- Fix: the floating **🖨 Print via host** button always sent the add-on's
+  print direction option instead of the designer's. A multi-lane design
+  (direction *left*, 160 × 320 px) was squeezed into the row the wrong way
+  round and came out tiny on a single label. It now uses the designer's
+  direction (Label properties).
+- The print server also recognises an image that is exactly the detected
+  roll turned for the other direction and prints it that way (logged).
+- Image templates made in the designer print in the direction they were
+  designed for.
+- With Object mirroring on, the floating button asks to print from
+  Preview (mirrored copies only exist in the preview).
+
 ## 1.5.0
 - **Multi-lane label rolls** (several labels side by side, e.g.
   `T10*20/4L` = 4 labels of 10 × 20 mm): the lane count is read from the

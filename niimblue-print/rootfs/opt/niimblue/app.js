@@ -95,6 +95,35 @@
     }, 0);
   }
   $("designer").addEventListener("load", focusDesigner);
+
+  // ---- open a label in the designer ---------------------------------------------
+  // GET <path> -> { source: "design" | "image", design } (history entry or
+  // image template). The designer frame exposes window.nbhostDesigner (build
+  // patch); it asks before replacing unsaved changes.
+  function designerHook(ms) {
+    var f = $("designer"), until = Date.now() + ms;
+    return new Promise(function (resolve, reject) {
+      (function poll() {
+        var h = null;
+        try { h = f.contentWindow && f.contentWindow.nbhostDesigner; } catch (e) { /* not ready */ }
+        if (h) return resolve(h);
+        if (Date.now() > until) return reject(new Error("the designer did not load"));
+        setTimeout(poll, 200);
+      })();
+    });
+  }
+  function openInDesigner(path, btn) {
+    if (btn) btn.disabled = true;
+    return api("GET", path).then(function (r) {
+      showTab("designer");
+      return designerHook(20000).then(function (h) { return h.open(r.design); }).then(function (opened) {
+        if (opened === false) return;
+        toast(r.source === "design" ? "Opened in the designer" :
+          "Opened as an image (not printed from the designer, so its text is not editable)");
+      });
+    }).catch(function (e) { toast("Open in designer: " + e.message, false); })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
   document.querySelectorAll(".tabs button").forEach(function (b) {
     b.addEventListener("click", function () { showTab(b.dataset.tab); });
   });
@@ -310,6 +339,8 @@
         ? "Image from the designer: printed as designed (fitted to the label). Text in it cannot change — use a text template for placeholders."
         : (t.description || "") + (t.uses_counter ? " Next {{counter}}: " + t.counter + "." : "");
       $("t-edit").hidden = t.type !== "text";
+      $("t-open").hidden = t.type !== "image";
+      $("t-open").title = t.has_design ? "Load this template into the designer (editable)" : "Load the template image into the designer";
       var box = $("t-vars");
       box.textContent = "";
       t.variables.forEach(function (v) {
@@ -351,6 +382,9 @@
     $("q-tplname").value = T.full.name;
     showTab("quick");
   });
+  $("t-open").addEventListener("click", function () {
+    if (T.full && T.full.type === "image") openInDesigner("templates/" + encodeURIComponent(T.full.name) + "/design", $("t-open"));
+  });
   $("t-refresh").addEventListener("click", loadTemplates);
   loaders.templates = loadTemplates;
 
@@ -374,13 +408,19 @@
             function (err) { toast("Reprint failed: " + err.message, false); })
             .then(function () { btn.disabled = false; loadHistory(); refreshStatus(); });
         });
+        var open = el("button", { type: "button", class: "btn small",
+          text: "Open in designer",
+          title: e.has_design ? "Load this label into the designer (editable)" : "Load the printed image into the designer" });
+        open.disabled = !(e.pages && e.pages.length);
+        open.addEventListener("click", function () { openInDesigner("history/" + e.id + "/design", open); });
         var what = e.kind + (e.template ? " · " + e.template : "") + " · via " + e.source;
         ul.appendChild(el("li", null,
           el("div", { class: "thumb" }, img),
           el("div", { class: "line" }, el("span", { text: fmtTime(e.at) }),
             el("span", { class: "badge " + state[0], text: state[1], title: e.error || "" })),
           el("div", { class: "sum", text: e.summary || "(image)" }),
-          el("div", { class: "line" }, el("span", { text: what + " · " + e.copies + "×" + (e.size ? " · " + e.size.width + "×" + e.size.height : "") }), btn),
+          el("div", { class: "line" }, el("span", { text: what + " · " + e.copies + "×" + (e.size ? " · " + e.size.width + "×" + e.size.height : "") }),
+            el("span", { class: "btns" }, open, btn)),
           e.error ? el("div", { class: "line", text: e.error }) : null));
       });
     }).catch(function (e) { toast("History: " + e.message, false); });

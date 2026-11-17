@@ -86,6 +86,7 @@ const labelSize = require(path.join(__dirname, "label-size.js"));
 const { createFeatures } = require(path.join(LIB_DIR, "features.js"));
 const { TemplateStore } = require(path.join(LIB_DIR, "templates.js"));
 const { History } = require(path.join(LIB_DIR, "history.js"));
+const designerDoc = require(path.join(LIB_DIR, "designer-doc.js"));
 const { Warnings, haNotifier } = require(path.join(LIB_DIR, "warnings.js"));
 const { MqttBridge } = require(path.join(LIB_DIR, "mqtt-bridge.js"));
 const { PrintQueue } = require(path.join(LIB_DIR, "queue.js"));
@@ -495,6 +496,22 @@ function labelGeometry(printDirection) {
   });
 }
 
+/**
+ * The other print direction when the first page is exactly the detected roll
+ * for THAT direction but not for `dir` (e.g. a 160x320 designer canvas for a
+ * 4-lane roll sent with direction "top", whose roll is 320x160 there), else
+ * null. Fitting it into the wrong orientation would shrink it into one lane.
+ * Square labels match both ways and are left alone.
+ */
+async function imageDirection(pages, dir) {
+  const other = dir === "left" ? "top" : "left";
+  const here = labelGeometry(dir), there = labelGeometry(other);
+  if (!here || !there || !pages.length) return null;
+  const m = await sharp(pages[0].buf).metadata();
+  const fits = (g) => Math.abs(m.width - g.label_width_px) <= 8 && Math.abs(m.height - g.label_height_px) <= 8;
+  return !fits(here) && fits(there) ? other : null;
+}
+
 /** Designer layout (size, direction, lane split) of the current roll, or null. */
 function labelDesigner() {
   if (!state.label || !state.label.tpl) return null;
@@ -886,6 +903,9 @@ const PrintSchema = PrintOptsSchema.extend({
   imageBase64: z.string().optional(),
   imageUrl: z.string().optional(),
   pages: z.array(PageSchema).min(1).max(100).optional(),
+  // NiimBlue designer document of the label (canvas JSON + label props): kept
+  // with the history entry for "Open in designer"; not used for printing
+  design: z.any().optional(),
 }).refine(({ imageUrl, imageBase64, pages }) => (!!imageUrl || !!imageBase64) !== !!pages,
   { message: "Provide either imageUrl/imageBase64 or pages, but not both", path: ["image"] })
   .refine(({ imageUrl, imageBase64 }) => !(imageUrl && imageBase64),
@@ -1071,10 +1091,21 @@ const pngSize = (buf) => ({ width: buf.readUInt32BE(16), height: buf.readUInt32B
  * requests fail before they are queued); pages: [{ buf: PNG, quantity }];
  * ctx: { source, kind, template, summary, reprint_of, final }.
  */
+// designer documents of queued jobs (job id -> design), handed to the history
+// when the job ends. In memory only: after a restart such an entry opens as
+// its image.
+const jobDesigns = new Map();
+const MAX_JOB_DESIGNS = 100;
+
 function enqueue(opts, pages, ctx = {}) {
   const o = PrintOptsSchema.parse(opts);
   delete o.waitUntilFinished;
-  const job = queue.add({ ...ctx, opts: o }, pages);
+  const { design, ...info } = ctx;
+  const job = queue.add({ ...info, opts: o }, pages);
+  if (design) {
+    jobDesigns.set(job.id, design);
+    for (const k of jobDesigns.keys()) { if (jobDesigns.size <= MAX_JOB_DESIGNS) break; jobDesigns.delete(k); }
+  }
   log(`job ${job.id} queued (${ctx.kind || "image"}${ctx.template ? " " + ctx.template : ""}, via ${ctx.source || "rest"}, ` +
     `${pages.length} page(s))${queue.pending().length > 1 ? `, ${queue.pending().length - 1} ahead` : ""}`);
   return job;
@@ -1135,6 +1166,8 @@ function onJobFinished(job, pages, final) {
   if (mqttBridge && job.state !== "done" && job.state !== "cancelled") {
     mqttBridge.result({ ok: false, action: "job", job_id: job.id, state: job.state, error: job.last_error, source: job.source });
   }
+  const design = jobDesigns.get(job.id) || null;
+  jobDesigns.delete(job.id);
   if (job.state === "cancelled" || !history || !pages.length) return;
   const replay = { ...job.opts };
   if (final || job.final) {
@@ -1149,7 +1182,7 @@ function onJobFinished(job, pages, final) {
     label: L ? { name: L.tpl ? L.tpl.name : null, barcode: L.barcode } : null,
     size: pngSize(pages[0].buf), final: !!(final || job.final), opts: replay,
     ok: job.state === "done", status: job.state === "done" ? "printed" : job.state,
-    error: job.state === "done" ? null : job.last_error,
+    error: job.state === "done" ? null : job.last_error, design,
   }, pages.map((p) => ({ png: p.buf, quantity: p.quantity })));
 }
 
@@ -1183,7 +1216,7 @@ async function runJob(job) {
       return block;
     }
     const o = job.opts;
-    const printDirection = o.printDirection ?? CFG.printDirection;
+    let printDirection = o.printDirection ?? CFG.printDirection;
     const printTask = o.printTask ?? autoPrintTask(c);
     if (!printTask) return { action: "fail", state: "no_print_task", message: "Unable to detect print task; set 'model' in the add-on options" };
     // Size AFTER connecting: connect() has just read the roll's RFID tag. A
@@ -1192,6 +1225,13 @@ async function runJob(job) {
     const pending = state.label && lookups.get(state.label.barcode);
     const auto = o.labelWidth === undefined && o.labelHeight === undefined && !CFG.labelWidth && !CFG.labelHeight;
     if (pending && auto) await pending;
+    if (auto) {
+      const turned = await imageDirection(queue.pages(job), printDirection || "left").catch(() => null);
+      if (turned) {
+        log(`image is the roll turned for direction ${turned} (not ${printDirection || "left"}): printing it as ${turned}`);
+        printDirection = turned;
+      }
+    }
     // niimblue-node's encoder treats an undefined direction as "left".
     const size = targetSize(o, printDirection || "left");
     if (size && size.from !== "request") log(`image size ${size.width}x${size.height} px (${size.from})`);
@@ -1205,9 +1245,21 @@ async function runJob(job) {
     }
     finals = done;
     const pages = [];
+    const headPx = c.getModelMetadata()?.printheadPixels;
+    let padNote = null;
     for (const { buf, quantity } of finals) {
-      pages.push({ encoded: await nb.ImageEncoder.encodeImage(sharp(buf), lib.PageColorType.SingleColor, printDirection), quantity });
+      // centre a label narrower than the head on the head (label-size.js);
+      // only here, so history / reprints keep the label's own size
+      let img = sharp(buf);
+      const { width, height } = await img.metadata();
+      const pad = labelSize.centrePadAcross(width, height, printDirection, headPx);
+      if (pad) {
+        img = sharp(await img.extend({ ...pad, background: "#fff" }).png().toBuffer());
+        padNote = `${width}x${height} centred on the ${headPx} px head`;
+      }
+      pages.push({ encoded: await nb.ImageEncoder.encodeImage(img, lib.PageColorType.SingleColor, printDirection), quantity });
     }
+    if (padNote) log(`image ${padNote}`);
     const copies = pages.reduce((n, p) => n + (p.quantity ?? o.quantity), 0);
     const density = autoDensity(o.density);
     const labelType = o.labelType ?? autoLabelType();
@@ -1256,8 +1308,13 @@ async function handlePrint(body, ctx = {}) {
     }
   }
   const opts = { ...o };
-  for (const k of ["imageBase64", "imageUrl", "pages"]) delete opts[k];
-  const job = enqueue(opts, loaded, { kind: "image", summary: o.imageUrl ? `image ${o.imageUrl.slice(0, 80)}` : null, ...ctx });
+  for (const k of ["imageBase64", "imageUrl", "pages", "design"]) delete opts[k];
+  // the design is a bonus for "Open in designer": a bad one never fails the print
+  let design = null;
+  if (o.design !== undefined) {
+    try { design = designerDoc.checkDesign(o.design); } catch (e) { log(`print: design not kept (${msg(e)})`); }
+  }
+  const job = enqueue(opts, loaded, { kind: "image", summary: o.imageUrl ? `image ${o.imageUrl.slice(0, 80)}` : null, ...ctx, design });
   return respond(job, body);
 }
 
@@ -1541,7 +1598,7 @@ warnings = new Warnings({
 });
 features = createFeatures({
   CFG: { ...CFG, threshold: CFG.threshold }, sharp, log, RestError, templates, history, queue,
-  enqueue, respond, textCanvas,
+  enqueue, respond, textCanvas, labelLayout: labelDesigner,
   testInfo: () => ({
     label: state.label && state.label.tpl ? state.label.tpl.name : null,
     density: autoDensity(undefined),

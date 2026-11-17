@@ -6,6 +6,8 @@
  *   /data/history/<id>-<n>.png pages (final 1-bit images when the job got
  *                              that far, else the submitted input image)
  *   /data/history/<id>-thumb.png
+ *   /data/history/<id>-design.json  NiimBlue designer document, when the
+ *                              print came from the designer (has_design)
  *
  * Entry: { id, at, source, via, template, summary, ok, error, quantity,
  *          copies, label: {name, width_px, height_px}, final, pages:
@@ -56,6 +58,7 @@ class History {
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       const id = `${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`;
+      const { design, ...meta } = info || {};
       const kept = pages.slice(0, MAX_PAGES_STORED);
       const files = kept.map((p, i) => {
         const file = `${id}-${i}.png`;
@@ -65,11 +68,18 @@ class History {
       entry = {
         id,
         at: new Date().toISOString(),
-        ...info,
+        ...meta,
+        has_design: false,
         pages: files,
         pages_total: pages.length,
         reprintable: files.length > 0 && files.length === pages.length,
       };
+      if (design) {
+        try {
+          fs.writeFileSync(path.join(this.dir, `${id}-design.json`), JSON.stringify(design));
+          entry.has_design = true;
+        } catch (e) { this.log(`history: design not stored: ${e.message}`); }
+      }
       this.entries.unshift(entry);
       for (const old of this.entries.splice(this.max)) this.removeFiles(old);
       this.save();
@@ -98,7 +108,7 @@ class History {
   }
 
   removeFiles(entry) {
-    for (const f of [...(entry.pages || []).map((p) => p.file), `${entry.id}-thumb.png`]) {
+    for (const f of [...(entry.pages || []).map((p) => p.file), `${entry.id}-thumb.png`, `${entry.id}-design.json`]) {
       try { fs.rmSync(path.join(this.dir, f), { force: true }); } catch (_) { /* gone */ }
     }
   }
@@ -108,6 +118,13 @@ class History {
     const e = this.get(id);
     if (!e) return null;
     return e.pages.map((p) => ({ buf: fs.readFileSync(path.join(this.dir, p.file)), quantity: p.quantity }));
+  }
+
+  /** Stored designer document of an entry, or null. */
+  design(id) {
+    const e = this.get(id);
+    if (!e || !e.has_design) return null;
+    try { return JSON.parse(fs.readFileSync(path.join(this.dir, `${e.id}-design.json`), "utf8")); } catch (_) { return null; }
   }
 
   thumb(id) {

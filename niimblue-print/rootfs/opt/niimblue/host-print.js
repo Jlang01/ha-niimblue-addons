@@ -121,6 +121,11 @@
     catch (e) { toast("Canvas export failed: " + e, false); return null; }
   }
 
+  /** The editable design (NiimBlue document) via the designer hook, or null. */
+  function exportDesign() {
+    try { return window.nbhostDesigner ? window.nbhostDesigner.exportLabel() : null; } catch (e) { return null; }
+  }
+
   function readResponse(r) {
     return r.text().then(function (t) {
       var j = null;
@@ -132,9 +137,17 @@
   function print() {
     var img = exportCanvas();
     if (!img) return;
+    // the designer's own direction (Label properties), not the add-on option:
+    // a "left" canvas sent as "top" is squeezed into the wrong orientation
+    var lp = readLabelProps();
+    var dir = lp && (lp.printDirection === "left" || lp.printDirection === "top") ? lp.printDirection : (cfg.printDirection || "top");
+    if (lp && lp.mirror && lp.mirror !== "none") {
+      toast("Object mirroring is applied in Preview only: use Preview → Print for this label.", false);
+      return;
+    }
     var body = {
       imageBase64: img.b64,
-      printDirection: cfg.printDirection || "top",
+      printDirection: dir,
       threshold: cfg.threshold || 128,
       imageFit: cfg.imageFit || "contain",
       quantity: parseInt(document.getElementById("nb-qty").value, 10) || 1,
@@ -143,6 +156,8 @@
     if (cfg.model) body.printTask = cfg.model;
     if (cfg.labelWidth && cfg.labelWidth > 0) body.labelWidth = cfg.labelWidth;
     if (cfg.labelHeight && cfg.labelHeight > 0) body.labelHeight = cfg.labelHeight;
+    var design = exportDesign();   // for "Open in designer" from the history
+    if (design) body.design = design;
 
     btn.disabled = true; btn.textContent = "🖨 Printing…";
     fetch(API + "/print", {
@@ -178,6 +193,8 @@
     var L = window.NIIMBLUE_LABEL || {};
     var body = { type: "image", imageBase64: img.b64,
       label: { name: L.name || null, width_px: img.w, height_px: img.h } };
+    var design = exportDesign();   // "Open in designer" from the Templates tab
+    if (design) body.design = design;
     if (cfg.density) body.density = cfg.density;
     fetch(API + "/templates/" + encodeURIComponent(name), {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),

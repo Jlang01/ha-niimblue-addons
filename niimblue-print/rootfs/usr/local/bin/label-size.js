@@ -241,7 +241,31 @@ function centreCropAcross(width, height, printDirection, printheadPx) {
     : { left: 0, top: off, width, height: head };
 }
 
+/**
+ * White padding (sharp extend() args) that centres a width x height image on
+ * the printhead when its across-head side is narrower than the head, else
+ * null. The printer does not centre a narrower image: it is printed from one
+ * end of the head while the roll sits centred under it. Seen 2026-11-17 on
+ * the B21S with the 40 mm 4-lane roll: a 320 px row came out 32 px (4 mm,
+ * half of 384-320) towards one side - lane 1 fell off the roll, lane 2 sat
+ * on the cut line. Padding to the full head puts the label centre on the
+ * head centre, like the wider-than-head case (centreCropAcross).
+ */
+function centrePadAcross(width, height, printDirection, printheadPx) {
+  const head = floor8(posNum(printheadPx, 100000) || 0);
+  if (!head) return null;
+  const top = printDirection !== "left";
+  const across = top ? width : height;
+  if (across >= head) return null;
+  const before = Math.floor((head - across) / 2);
+  const after = head - across - before;
+  return top
+    ? { left: before, right: after, top: 0, bottom: 0 }
+    : { top: before, bottom: after, left: 0, right: 0 };
+}
+
 module.exports = {
   parseCloudTemplate, labelCanvas, orientMm, lanesFromName, designerLayout, englishName, blindZone, centreCropAcross,
+  centrePadAcross,
   DEFAULT_DPI, DEFAULT_PRINTHEAD_PX, PAPER_GAP, PAPER_BLACK_MARK, PAPER_TRANSPARENT,
 };

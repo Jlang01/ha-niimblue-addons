@@ -10,6 +10,8 @@
  *   GET  /history  DELETE /history
  *   GET  /history/{id}/thumb.png   GET /history/{id}/{n}.png
  *   POST /history/{id}/reprint     ({id} may be "last")
+ *   GET  /history/{id}/design      NiimBlue designer document ("Open in designer")
+ *   GET  /templates/{name}/design  same for an image template
  *   GET  /queue  DELETE /queue  DELETE /queue/{id}  POST /queue/{id}/retry
  *   POST /test                     built-in test label
  *
@@ -23,6 +25,7 @@ const { renderText, layoutInfo } = require("./text-render");
 const { normalizeSpec } = require("./text-layout");
 const ph = require("./placeholders");
 const { renderTestPng } = require("./test-pattern");
+const designerDoc = require("./designer-doc");
 
 const MAX_COUNTER_LABELS = 100;   // one rendered page per label when {{counter}} is used
 
@@ -33,6 +36,7 @@ const MAX_COUNTER_LABELS = 100;   // one rendered page per label when {{counter}
  *   enqueue(opts, pages[{buf, quantity}], ctx) -> job      (validates, queues)
  *   respond(job, body) -> response (200 printed / 202 queued / error)
  *   textCanvas(body) -> { width, height, margins, printDirection, from, lanes?, laneAxis? }
+ *   labelLayout() -> designer layout of the roll in the printer (label-size.js) | null
  *   testInfo() -> { label, density }
  *   templates: TemplateStore, history: History, queue: PrintQueue,
  * }
@@ -193,8 +197,10 @@ function createFeatures(core) {
         for (const k of ["density", "printTask", "labelType", "threshold", "printDirection"]) {
           if (merged[k] !== undefined) opts[k] = merged[k];
         }
+        // made in the designer: print in the direction it was designed for
+        if (opts.printDirection === undefined && t.design) opts.printDirection = t.design.label.printDirection;
         const job = core.enqueue(opts, [{ buf: Buffer.from(t.image, "base64"), quantity }],
-          { ...hctx, summary: `template ${t.name}` });
+          { ...hctx, summary: `template ${t.name}`, design: t.design || null });
         return { result: { job, extra: { template: t.name } }, used: 0 };
       }
 
@@ -267,9 +273,40 @@ function createFeatures(core) {
     }
     const res = await submit(opts, pages, {
       ...ctx, kind: "reprint", template: e.template || null, summary: `reprint: ${e.summary || e.id}`,
-      reprint_of: e.id, final: !!e.final,
+      reprint_of: e.id, final: !!e.final, design: history.design(e.id),
     }, body);
     return { ...res, reprint_of: e.id };
+  }
+
+  // ---- open in designer -----------------------------------------------------------
+  /**
+   * Designer document for a printed / template image without a stored design:
+   * the image on a label of its size. Direction: the given one, else the
+   * roll's designer direction when the size is the roll's, else the option.
+   */
+  async function imageDoc(png, printDirection, title) {
+    const m = await sharp(png).metadata();
+    const layout = core.labelLayout ? core.labelLayout() : null;
+    const rollSize = layout && layout.width === m.width && layout.height === m.height;
+    const dir = printDirection || (rollSize ? layout.printDirection : CFG.printDirection) || "top";
+    return designerDoc.imageDesign(png, { width: m.width, height: m.height, printDirection: dir, title, layout });
+  }
+
+  async function historyDesign(id) {
+    const e = historyEntry(id);
+    const d = history.design(e.id);
+    if (d) return { source: "design", design: d };
+    const page = (history.pages(e.id) || [])[0];
+    if (!page) throw new RestError("this print has no stored image", 404);
+    return { source: "image", design: await imageDoc(page.buf, e.opts && e.opts.printDirection, e.summary) };
+  }
+
+  async function templateDesign(name) {
+    let t;
+    try { t = templates.get(name); } catch (e) { throw new RestError(e.message, e.status || 400); }
+    if (t.type !== "image") throw new RestError("text templates are edited in Quick print, not in the designer", 409);
+    if (t.design) return { source: "design", design: t.design };
+    return { source: "image", design: await imageDoc(Buffer.from(t.image, "base64"), null, t.name) };
   }
 
   /** Test label sized to the printed area (border, marks, grid, text sizes). */
@@ -321,6 +358,8 @@ function createFeatures(core) {
       return { raw: p.buf, type: "image/png" };
     }],
     ["POST", P("/history/([a-z0-9]+)/reprint"), (m, body, ctx) => reprint(m[1], body, ctx)],
+    ["GET", P("/history/([a-z0-9]+)/design"), (m) => historyDesign(m[1])],
+    ["GET", P("/templates/([^/]+)/design"), (m) => templateDesign(m[1])],
     ["GET", P("/queue"), () => ({ jobs: queue.list(), ...queue.summary() })],
     ["DELETE", P("/queue"), () => queue.clear()],
     ["DELETE", P("/queue/([a-z0-9]+)"), (m) => wrapQueue(() => queue.cancel(m[1]))],

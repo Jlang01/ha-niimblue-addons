@@ -151,6 +151,7 @@ details.save[open] { border-top: 1px solid var(--line); padding-top: 8px; }
   min-height: 90px; border: 1px solid var(--line); }
 .grid .thumb img { max-width: 100%; max-height: 150px; image-rendering: pixelated; }
 .grid .line { display: flex; justify-content: space-between; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+.grid .line .btns { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .grid .sum { font-size: 13px; overflow-wrap: anywhere; }
 
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 8px; font-size: 13px; }

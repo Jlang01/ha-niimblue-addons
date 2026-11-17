@@ -82,3 +82,15 @@ test("text on a 4-lane roll is laid out per lane and repeated on every lane", as
     assert.equal(ink(row), 0, `row ${y} (lane edge) is blank`);
   }
 });
+
+test("centrePadAcross: a row narrower than the head is centred on it", () => {
+  // 4-lane roll, direction left: 160 x 320, height across -> 32 px each side
+  assert.deepEqual(labelSize.centrePadAcross(160, 320, "left", 384), { top: 32, bottom: 32, left: 0, right: 0 });
+  assert.deepEqual(labelSize.centrePadAcross(320, 160, "top", 384), { left: 32, right: 32, top: 0, bottom: 0 });
+  // odd difference: the extra pixel goes after
+  assert.deepEqual(labelSize.centrePadAcross(376 - 3, 100, "top", 384), { left: 5, right: 6, top: 0, bottom: 0 });
+  // full head / wider (cropped instead) / unknown head: nothing
+  assert.equal(labelSize.centrePadAcross(384, 240, "top", 384), null);
+  assert.equal(labelSize.centrePadAcross(400, 240, "top", 384), null);
+  assert.equal(labelSize.centrePadAcross(320, 160, "top", undefined), null);
+});

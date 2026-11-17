@@ -6,7 +6,8 @@
  *                  {{placeholders}}; rendered fresh for every print.
  *   type "image" : a PNG made in the designer, printed as is (fitted to the
  *                  label like /print). Its text is pixels, so placeholders and
- *                  {{counter}} cannot work there.
+ *                  {{counter}} cannot work there. Optional `design`: the
+ *                  NiimBlue designer document, for "Open in designer".
  *
  * File: { version, name, type, description, layout | image, defaults,
  *         label: {name, width_px, height_px} (what it was made for),
@@ -18,6 +19,7 @@ const path = require("path");
 const { normalizeSpec } = require("./text-layout");
 const ph = require("./placeholders");
 const { writeJsonAtomic, readJson } = require("./persist");
+const { checkDesign } = require("./designer-doc");
 
 class TemplateError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -93,6 +95,7 @@ class TemplateStore {
       counter: t.counter ? t.counter.next : 1,
       defaults: t.defaults || {},
       label: t.label || null,
+      has_design: !!t.design,
       updated_at: t.updated_at || null,
     };
   }
@@ -168,6 +171,12 @@ class TemplateStore {
       if (bytes.length < 8 || bytes.readUInt32BE(0) !== 0x89504e47) throw new TemplateError("imageBase64 must be a PNG");
       if (bytes.length > IMAGE_MAX_BYTES) throw new TemplateError("image too large (max 4 MB)");
       t.image = b64;
+      // editable designer document: optional, a bad one is dropped (the
+      // image is what prints). Not carried over from an older version: it
+      // would no longer match the new image.
+      if (body.design !== undefined && body.design !== null) {
+        try { t.design = checkDesign(body.design); } catch (_) { /* image only */ }
+      }
     } else if (type === "text") {
       const layout = pickLayout(body.layout && typeof body.layout === "object" ? body.layout : body);
       normalizeSpec(layout);   // validate now (throws 400 with the reason)

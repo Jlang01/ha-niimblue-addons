@@ -125,5 +125,15 @@ If HA shows an old "Neueste Version" after a push:
   used by host-print.js preset + the LabelPropsEditor patch ("Use detected
   roll" + fit warnings on FORM values). Text: core.textCanvas sets
   `lanes`/`laneAxis` (only when sized from the roll, not clipped, direction
-  not overridden), features.js renders one lane and tiles it. Real print
-  orientation on a 4L roll not yet verified on hardware.
+  not overridden), features.js renders one lane and tiles it.
+- The printer does NOT centre an image narrower than the head (B21S, 320 px
+  row on 384 head came out 32 px to one side, 2026-11-17). runJob pads the
+  across side to the head right before encoding (`centrePadAcross`); history
+  / reprints keep the unpadded label image.
+- "Open in designer" (1.6.0): the LabelDesigner patch exposes
+  `window.nbhostDesigner { exportLabel(), open(label) }`. Prints/templates
+  from the designer send `design` (NiimBlue ExportedLabelTemplate, checked
+  by `lib/designer-doc.js`, max 4 MB, never fails a print). Queued jobs keep
+  it in memory (`jobDesigns`) -> history `<id>-design.json`. GET
+  `/history/{id}/design` and `/templates/{name}/design` return it or an
+  image-only document (`imageDesign`).

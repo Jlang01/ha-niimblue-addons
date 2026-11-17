@@ -491,7 +491,59 @@ let brokerOn = false;
       // explicit direction top: no lane layout (row as one label)
       const t = (await call("POST", "/preview/text", { text: "Salz", format: "json", printDirection: "top" })).json;
       assert.deepEqual([t.width, t.height], [320, 160]);
+      // designer canvas for the lane layout (160x320) sent with direction top
+      // (floating button before 1.5.1): printed as left, not squeezed into one lane
+      const img = await sharp({ create: { width: 160, height: 320, channels: 3, background: "#fff" } }).png().toBuffer();
+      const p = await call("POST", "/print", { imageBase64: img.toString("base64"), printDirection: "top" });
+      assert.equal(p.status, 200, p.text);
+      assert.match(log, /image is the roll turned for direction left \(not top\): printing it as left/);
+      assert.match(log, /image size 160x320 px \(label T10\*20\/4L-1200WHITE\)/);
+      // the 320 px row is centred on the 384 px head (printer does not)
+      assert.match(log, /image 160x320 centred on the 384 px head/);
       ctrl("roll_4l", false);
+    });
+
+    await check("Open in designer: stored design, image fallback (with lane split), image template", async () => {
+      const design = {
+        canvas: { version: "7.4.0", objects: [{ type: "Textbox", text: "Salz" }] },
+        label: { printDirection: "left", size: { width: 160, height: 320 }, split: "horizontal", splitParts: 4 },
+      };
+      const img = await sharp({ create: { width: 160, height: 320, channels: 3, background: "#fff" } }).png().toBuffer();
+      const p = await call("POST", "/print", { imageBase64: img.toString("base64"), printDirection: "left", design });
+      assert.equal(p.status, 200, p.text);
+      const withDesign = (await call("GET", `/history/${p.json.history_id}/design`)).json;
+      assert.equal(withDesign.source, "design");
+      assert.deepEqual(withDesign.design.canvas.objects, design.canvas.objects);
+      // a bad design never fails the print
+      const bad = await call("POST", "/print", { imageBase64: img.toString("base64"), printDirection: "left", design: { x: 1 } });
+      assert.equal(bad.status, 200, bad.text);
+      assert.match(log, /print: design not kept/);
+      // text print: opens as its image on the label, still on the 4-lane roll -> split
+      ctrl("roll_4l", true);
+      srv.kill("SIGKILL");
+      await sleep(300);
+      await startServer();
+      await until(async () => ((await call("GET", "/status")).json.label || {}).barcode === "12222118", 15000);
+      const t = await call("POST", "/print/text", { text: "Pfeffer" });
+      assert.equal(t.status, 200, t.text);
+      const asImage = (await call("GET", `/history/${t.json.history_id}/design`)).json;
+      assert.equal(asImage.source, "image");
+      assert.deepEqual(asImage.design.label, { printDirection: "left", size: { width: 160, height: 320 }, split: "horizontal", splitParts: 4 });
+      assert.equal(asImage.design.canvas.objects[0].type, "Image");
+      ctrl("roll_4l", false);
+      // reprint keeps the design
+      const r = await call("POST", `/history/${p.json.history_id}/reprint`, {});
+      assert.equal(r.status, 200, r.text);
+      assert.equal((await call("GET", `/history/${r.json.history_id}/design`)).json.source, "design");
+      // image template with design: opens editable, prints in its direction
+      assert.equal((await call("PUT", "/templates/salz", { type: "image", imageBase64: img.toString("base64"), design })).status, 200);
+      const td = (await call("GET", "/templates/salz/design")).json;
+      assert.equal(td.source, "design");
+      assert.equal((await call("GET", "/templates/nope/design")).status, 404);
+      const tp = await call("POST", "/print/template/salz", {});
+      assert.equal(tp.status, 200, tp.text);
+      assert.match(log, /job \w+: printing 1 page\(s\), 1 label\(s\), task B1, direction left[^\n]*\n(?![\s\S]*job \w+: printing)/);
+      assert.equal((await call("DELETE", "/templates/salz")).status, 200);
     });
   } finally {
     if (mc) mc.end(true);
