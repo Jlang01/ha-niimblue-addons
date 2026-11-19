@@ -500,6 +500,16 @@ let brokerOn = false;
       assert.match(log, /image size 160x320 px \(label T10\*20\/4L-1200WHITE\)/);
       // the 320 px row is centred on the 384 px head (printer does not)
       assert.match(log, /image 160x320 centred on the 384 px head/);
+      // numbered template: one number per label, lane by lane (1-4 | 5-6 + 2 blank)
+      assert.equal((await call("PUT", "/templates/lanenum", { type: "text", layout: { lines: ["#{{counter}}"] } })).status, 200);
+      const n = await call("POST", "/print/template/lanenum", { quantity: 6 });
+      assert.equal(n.status, 200, n.text);
+      assert.deepEqual([n.json.counter_first, n.json.counter_last, n.json.rows, n.json.blank_lanes], [1, 6, 2, 2]);
+      assert.match(log, /printing 2 page\(s\), 2 label\(s\)/);
+      // plain text: 6 labels = 2 rows
+      const q = await call("POST", "/print/text", { text: "Salz", quantity: 6 });
+      assert.deepEqual([q.json.rows, q.json.labels], [2, 8]);
+      await call("DELETE", "/templates/lanenum");
       ctrl("roll_4l", false);
     });
 

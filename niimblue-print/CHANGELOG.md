@@ -3,6 +3,19 @@
 Home Assistant shows this file in the add-on's update dialog. Newest on top.
 Bump `version:` in `config.yaml` and add a matching entry here on every push.
 
+## 1.7.0
+- **Numbering on multi-lane rolls:** `{{counter}}` templates now give every
+  label of a row its own number, lane by lane: copies 6 on the 4-lane roll
+  print `1 2 3 4` and `5 6` (the last two labels stay blank). Before, every
+  lane of a row carried the same number.
+- On a multi-lane roll, **Copies counts labels**, not rows: 6 copies = 2 rows
+  (quick print and text templates; image templates and designer prints are
+  a whole row, their copies stay rows). Text and fixed templates fill the
+  whole last row. The toast says how many
+  rows were printed; the template preview shows the next row's numbers.
+- Docs: the printer does not centre the roll. Centre it with the holder's
+  separators (the 1.6.0 note said otherwise).
+
 ## 1.6.0
 - **Open in designer** from the History and Templates tabs. Labels printed
   from the designer (Preview → Print or the 🖨 button) and image templates
@@ -13,8 +26,8 @@ Bump `version:` in `config.yaml` and add a matching entry here on every push.
 - Fix: **labels narrower than the printhead were printed off-centre.** The
   printer does not centre a narrower image: on the 40 mm 4-lane roll the
   row came out 4 mm to one side (first label missing, the next on the cut
-  line). Prints are now centred on the head. The roll itself needs no
-  alignment: the holder centres it and the printer only detects the gaps.
+  line). Prints are now centred on the head. Centre the roll in the
+  holder with its separators: the printer only detects the gaps.
 - Fix: the floating **🖨 Print via host** button always sent the add-on's
   print direction option instead of the designer's. A multi-lane design
   (direction *left*, 160 × 320 px) was squeezed into the row the wrong way

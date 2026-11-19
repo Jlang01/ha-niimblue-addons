@@ -80,10 +80,23 @@ function createFeatures(core) {
     spec.qr ? `[QR ${spec.qr.data.slice(0, 40)}]` : "", spec.barcode ? `[${spec.barcode.type} ${spec.barcode.data}]` : ""]
     .filter(Boolean).join(" ").slice(0, 160);
 
+  /** Labels per printed row: canvas.lanes on a multi-lane roll, else 1. */
+  const lanesOf = (canvas) => (canvas.lanes > 1 ? canvas.lanes : 1);
+  /** Rows to print for `labels` labels (a row is printed whole). */
+  const rowsFor = (labels, canvas) => Math.ceil(labels / lanesOf(canvas));
+
+  /**
+   * Render one printed label (= one row on a multi-lane roll). `spec` is one
+   * spec (repeated on every lane) or an array with one spec per lane (null
+   * = lane left blank).
+   */
   async function render(spec, canvas, threshold) {
     try {
-      if (canvas.lanes > 1) return await renderLanes(spec, canvas, threshold);
-      return await renderText({ ...spec, _normalized: true }, canvas, { sharp, threshold });
+      if (canvas.lanes > 1) {
+        const specs = Array.isArray(spec) ? spec : new Array(canvas.lanes).fill(spec);
+        return await renderLanes(specs, canvas, threshold);
+      }
+      return await renderText({ ...(Array.isArray(spec) ? spec[0] : spec), _normalized: true }, canvas, { sharp, threshold });
     } catch (e) {
       if (e.status === 400) throw new RestError(e.message, 400);
       throw e;
@@ -91,30 +104,34 @@ function createFeatures(core) {
   }
 
   /**
-   * Multi-lane roll (canvas.lanes from core.textCanvas): lay the label out on
-   * ONE lane and repeat it on every lane of the row, so the text does not
-   * run across the gaps between the labels. Lane edges are rounded to whole
-   * px; the layout returned is the lane's.
+   * Multi-lane roll (canvas.lanes from core.textCanvas): lay each label out
+   * on its own lane, so the text does not run across the gaps between the
+   * labels. specs[i] is lane i's spec (null: blank); the same spec on equal
+   * lanes renders once. Lane edges are rounded to whole px; the layout
+   * returned is the first filled lane's.
    */
-  async function renderLanes(spec, canvas, threshold) {
+  async function renderLanes(specs, canvas, threshold) {
     const n = canvas.lanes;
     const alongX = canvas.laneAxis === "x";
     const total = alongX ? canvas.width : canvas.height;
     const edge = (i) => Math.round((total * i) / n);
     const tiles = [];
+    const done = [];   // [{ spec, size, r }]
     let first = null;
     for (let i = 0; i < n; i++) {
+      const spec = specs[i];
+      if (!spec) continue;
       const size = edge(i + 1) - edge(i);
       const laneCanvas = { ...canvas, lanes: 1, width: alongX ? size : canvas.width, height: alongX ? canvas.height : size };
-      // equal lanes (the usual case) render once
-      if (!first || first.size !== size) {
-        const r = await renderText({ ...spec, _normalized: true }, laneCanvas, { sharp, threshold });
-        if (!first) first = { ...r, size };
-        tiles.push({ input: r.png, left: alongX ? edge(i) : 0, top: alongX ? 0 : edge(i) });
-      } else {
-        tiles.push({ input: first.png, left: alongX ? edge(i) : 0, top: alongX ? 0 : edge(i) });
+      let hit = done.find((d) => d.spec === spec && d.size === size);
+      if (!hit) {
+        hit = { spec, size, r: await renderText({ ...spec, _normalized: true }, laneCanvas, { sharp, threshold }) };
+        done.push(hit);
       }
+      if (!first) first = hit.r;
+      tiles.push({ input: hit.r.png, left: alongX ? edge(i) : 0, top: alongX ? 0 : edge(i) });
     }
+    if (!first) throw new RestError("nothing to print", 400);
     let img = sharp({ create: { width: canvas.width, height: canvas.height, channels: 3, background: "#fff" } })
       .composite(tiles).greyscale();
     if (threshold) img = img.threshold(threshold).toColourspace("b-w");
@@ -138,10 +155,18 @@ function createFeatures(core) {
     const quantity = quantityOf(body);
     const canvas = core.textCanvas(body);
     const r = await render(spec, canvas);
-    const res = await submit(printOpts(body, canvas, { quantity }), [{ buf: r.png, quantity }],
+    // multi-lane roll: quantity counts labels; a row is printed whole, so a
+    // partly used last row is filled with the same text too
+    const rows = rowsFor(quantity, canvas);
+    const res = await submit(printOpts(body, canvas, { quantity: rows }), [{ buf: r.png, quantity: rows }],
       { ...ctx, kind: "text", summary: summaryOf(spec), final: true }, body);
-    return { ...res, layout: layoutInfo(r.layout), size_from: canvas.from };
+    return { ...res, layout: layoutInfo(r.layout), size_from: canvas.from, ...laneInfo(canvas, rows) };
   }
+
+  /** Response fields for a multi-lane roll ({} otherwise). */
+  const laneInfo = (canvas, rows, blank = 0) => (lanesOf(canvas) > 1
+    ? { lanes: lanesOf(canvas), rows, labels: rows * lanesOf(canvas) - blank, ...(blank ? { blank_lanes: blank } : {}) }
+    : {});
 
   async function previewResponse(png, layout, canvas, body) {
     if (body.format === "json") {
@@ -207,29 +232,41 @@ function createFeatures(core) {
       const canvas = templateCanvas(t, body);
       const counterUsed = ph.usesCounter(ph.specStrings(normalize(t.layout)));
       const start = t.counter ? t.counter.next : 1;
+      const lanes = lanesOf(canvas);
+      const rows = rowsFor(quantity, canvas);
       const pages = [];
       let first;
+      let blank = 0;
       if (counterUsed) {
+        // one number per label: on a multi-lane roll the lanes of a row get
+        // consecutive numbers (1 2 3 4 | 5 6 7 8 ...); lanes after the last
+        // number stay blank, so no number is used without being printed
         if (quantity > MAX_COUNTER_LABELS) throw new RestError(`max ${MAX_COUNTER_LABELS} numbered labels per print`, 400);
-        for (let i = 0; i < quantity; i++) {
-          const spec = templateSpec(t, body.vars, start + i);
-          const r = await render(spec, canvas);
-          if (!first) first = { r, spec };
+        blank = rows * lanes - quantity;
+        for (let row = 0; row < rows; row++) {
+          const specs = [];
+          for (let l = 0; l < lanes; l++) {
+            const i = row * lanes + l;
+            specs.push(i < quantity ? templateSpec(t, body.vars, start + i) : null);
+          }
+          const r = await render(specs, canvas);
+          if (!first) first = { r, spec: specs[0] };
           pages.push({ buf: r.png, quantity: 1 });
         }
       } else {
         const spec = templateSpec(t, body.vars, start);
         const r = await render(spec, canvas);
         first = { r, spec };
-        pages.push({ buf: r.png, quantity });
+        pages.push({ buf: r.png, quantity: rows });
       }
-      const job = core.enqueue(printOpts(merged, canvas, { quantity: counterUsed ? 1 : quantity }), pages,
+      const job = core.enqueue(printOpts(merged, canvas, { quantity: counterUsed ? 1 : rows }), pages,
         { ...hctx, summary: `${t.name}: ${summaryOf(first.spec)}`, final: true });
       return {
         result: {
           job,
           extra: {
             template: t.name, layout: layoutInfo(first.r.layout), size_from: canvas.from,
+            ...laneInfo(canvas, rows, blank),
             ...(counterUsed ? { counter_first: start, counter_last: start + quantity - 1 } : {}),
           },
         },
@@ -247,8 +284,14 @@ function createFeatures(core) {
       return { raw: png, type: "image/png" };
     }
     const canvas = templateCanvas(t, body);
-    // preview: missing variables show as their {{name}} instead of failing
-    const spec = templateSpec(t, body.vars, t.counter ? t.counter.next : 1, false);
+    // preview: missing variables show as their {{name}} instead of failing.
+    // The first printed row: on a multi-lane roll with {{counter}}, the next
+    // numbers lane by lane (as printTemplate numbers them)
+    const next = t.counter ? t.counter.next : 1;
+    const counterUsed = ph.usesCounter(ph.specStrings(normalize(t.layout)));
+    const spec = counterUsed && lanesOf(canvas) > 1
+      ? Array.from({ length: lanesOf(canvas) }, (_, l) => templateSpec(t, body.vars, next + l, false))
+      : templateSpec(t, body.vars, next, false);
     const r = await render(spec, canvas, body.threshold || CFG.threshold || 128);
     return previewResponse(r.png, r.layout, canvas, body);
   }

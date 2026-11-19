@@ -125,7 +125,10 @@ If HA shows an old "Neueste Version" after a push:
   used by host-print.js preset + the LabelPropsEditor patch ("Use detected
   roll" + fit warnings on FORM values). Text: core.textCanvas sets
   `lanes`/`laneAxis` (only when sized from the roll, not clipped, direction
-  not overridden), features.js renders one lane and tiles it.
+  not overridden), features.js renders one spec per lane (`renderLanes`).
+  Quantity counts LABELS on lane rolls (rows = ceil(q / lanes));
+  `{{counter}}` templates number lane by lane, unused lanes of the last row
+  blank (1.7.0). The roll is centred by hand (holder separators).
 - The printer does NOT centre an image narrower than the head (B21S, 320 px
   row on 384 head came out 32 px to one side, 2026-11-17). runJob pads the
   across side to the head right before encoding (`centrePadAcross`); history

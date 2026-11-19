@@ -55,8 +55,11 @@
 
   /** Toast for a print response: 200 printed, 202 queued (prints later). */
   function printedToast(r, extra) {
-    if (r && r._status === 202) toast("Queued: " + (r.message || "waiting for the printer"), true);
-    else toast("Printed ✓" + (extra || ""));
+    // multi-lane roll: say how many rows that was (and blank lanes, if any)
+    var rows = r && r.lanes > 1 ? " · " + r.rows + (r.rows === 1 ? " row" : " rows") +
+      (r.blank_lanes ? ", " + r.blank_lanes + " blank" : "") : "";
+    if (r && r._status === 202) toast("Queued: " + (r.message || "waiting for the printer") + rows, true);
+    else toast("Printed ✓" + (extra || "") + rows);
   }
 
   function debounce(fn, ms) {
@@ -151,6 +154,10 @@
         : (Qs.failed ? "⚠ " + Qs.failed + " failed" : ""), Qs.blocked_reason || "Print queue (Diagnostics tab)", !!(Qs.blocked || Qs.failed));
       var L = s.label;
       labelInfo = L;
+      var perRow = L && L.designer && L.designer.lanes > 1 ? L.designer.lanes : 0;
+      $("q-qty").title = perRow ? "Number of labels (" + perRow + " per row; a row is printed whole)" : "Number of labels";
+      $("t-qty").title = perRow ? "Text templates: number of labels (" + perRow + " per row). " +
+        "Image templates: number of rows (the design is the whole row)" : "Number of labels";
       if (L) {
         var size = L.width_mm ? " · " + L.width_mm + "×" + L.height_mm + " mm" : "";
         var D = L.designer;
@@ -158,7 +165,8 @@
         chip("st-label", "🏷 " + (L.name || L.barcode) + size + lanes,
           "Label roll (RFID " + L.barcode + ")" + (L.width_px ? "\nprinted area " + L.width_px + "×" + L.height_px + " px" : "") +
           (lanes ? "\n" + D.lanes + " labels side by side, each " + D.lane_width_mm + "×" + D.lane_height_mm +
-            " mm: one print = one row; quick-print text is repeated on every label" : ""));
+            " mm. Copies count labels, printed a row at a time: text is repeated on every label of the row, " +
+            "{{counter}} templates number them lane by lane (1 2 3 4 | 5 6 7 8)" : ""));
         chip("st-remaining", L.remaining != null ? L.remaining + " left" : "",
           L.total != null ? L.remaining + " of " + L.total + " labels left" : "", W.labels_low);
       } else {

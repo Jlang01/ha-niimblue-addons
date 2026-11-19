@@ -1252,7 +1252,7 @@ async function runJob(job) {
       // only here, so history / reprints keep the label's own size
       let img = sharp(buf);
       const { width, height } = await img.metadata();
-      const pad = labelSize.centrePadAcross(width, height, printDirection, headPx);
+      const pad = labelSize.centrePadAcross(width, height, printDirection || "left", headPx);
       if (pad) {
         img = sharp(await img.extend({ ...pad, background: "#fff" }).png().toBuffer());
         padNote = `${width}x${height} centred on the ${headPx} px head`;

@@ -183,7 +183,7 @@ Placeholders:
 | `{{date+7}}` `{{date-1}}` `{{date+2w}}` `{{date+3m}}` `{{date+1y}}` | date offset in days / weeks / months / years (best-before labels) |
 | `{{time+30}}` `{{datetime+2h}}` | offset in minutes / hours |
 | `{{date:DD.MM.YY}}` | own format: `YYYY YY MM M DD D HH H mm ss` |
-| `{{counter}}` `{{counter:4}}` | per-template number, **one per label** (copies 3 → 3 labels #5, #6, #7), zero-padded to 4 |
+| `{{counter}}` `{{counter:4}}` | per-template number, **one per label** (copies 3 → 3 labels #5, #6, #7; on a multi-lane roll lane by lane), zero-padded to 4 |
 
 The counter reserves its numbers when the job is queued: they are never
 printed twice, but a job that is cancelled or fails leaves a gap. Set it with
@@ -341,6 +341,25 @@ Keep content ~0.5 mm (4 px) away from the start and end of the feed on gap or
 transparent rolls (black-mark rolls: 1 mm is cut at the bottom); `/status`
 reports this as `label.blind_zone`. Text labels and the test label do this
 automatically.
+
+### Multi-lane rolls
+
+Rolls with several labels side by side (name ending in `/4L`, e.g.
+`T10*20/4L-1200WHITE`: four 10×20 mm labels per 40 mm row) are detected from
+the roll name. The designer gets the row with one split part per label, each
+lane edited landscape. The printer only sees whole rows, so:
+
+- **Copies count labels**, printed a row at a time: 6 copies on a 4-lane
+  roll = 2 rows. Exceptions: image templates and designer prints are the
+  whole row, so their copies are rows; a reprint repeats the job as it was.
+- Text labels and fixed templates are repeated on every label of the row
+  (a partly used last row is filled too: 6 copies print 8 labels).
+- `{{counter}}` templates number the labels **lane by lane**: copies 6 →
+  `1 2 3 4` on the first row, `5 6` on the second, the last two labels
+  stay blank (the counter only advances by the numbers printed).
+- Rows narrower than the printhead are centred on it. **Centre the roll in
+  the holder** with its separators (the printer does not centre it); a
+  residual shift can be trimmed with the designer's Preview offset.
 
 ## Automations
 
